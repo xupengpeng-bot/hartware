@@ -6,12 +6,13 @@ Purpose: this is the live software-engineer execution entry in the external deve
 
 ## Workspace anchors
 
-- development-system workspace:
-  - `D:\20251211\zhinengti\development-system\projects\houjinongfuai`
-- business-code workspace:
-  - `D:\20251211\zhinengti\houjinongfuai`
-- frontend workspace:
-  - `D:\20251211\zhinengti\lovable`
+Use workspace-relative anchors on the current machine:
+
+- `WORKSPACE_ROOT`
+- `DEVSYSTEM_REPO_ROOT = <WORKSPACE_ROOT>\development-system`
+- `PROJECT_DEV_ROOT = <DEVSYSTEM_REPO_ROOT>\projects\houjinongfuai`
+- `BUSINESS_REPO_ROOT = <WORKSPACE_ROOT>\houjinongfuai`
+- `FRONTEND_REPO_ROOT = <WORKSPACE_ROOT>\lovable`
 
 ## Current state
 
@@ -29,17 +30,17 @@ Purpose: this is the live software-engineer execution entry in the external deve
 ## Read order
 
 1. `D:\20251211\zhinengti\houjinongfuai\AGENTS.md`
-2. `D:\20251211\zhinengti\houjinongfuai\docs\README.md`
+2. `<BUSINESS_REPO_ROOT>\docs\README.md`
 3. `PROJECT-CONFIG-REGISTRY.md`
 4. `docs/codex/CURRENT.md`
 5. `docs/codex/WORK-MODES.md`
 6. `docs/codex/TASK-TYPES.md`
-7. `D:\20251211\zhinengti\development-system\shared\global-rules\task-taxonomy-matrix.md`
-8. `D:\20251211\zhinengti\development-system\shared\global-rules\role-lane-catalog.md`
-9. `D:\20251211\zhinengti\development-system\shared\global-rules\encoding-governance.md`
-10. `D:\20251211\zhinengti\development-system\shared\global-rules\development-system-evolution-rule.md`
-11. `D:\20251211\zhinengti\development-system\shared\global-rules\project-config-standard.md`
-12. `D:\20251211\zhinengti\development-system\shared\global-rules\windows-path-governance.md`
+7. `<DEVSYSTEM_REPO_ROOT>\shared\global-rules\task-taxonomy-matrix.md`
+8. `<DEVSYSTEM_REPO_ROOT>\shared\global-rules\role-lane-catalog.md`
+9. `<DEVSYSTEM_REPO_ROOT>\shared\global-rules\encoding-governance.md`
+10. `<DEVSYSTEM_REPO_ROOT>\shared\global-rules\development-system-evolution-rule.md`
+11. `<DEVSYSTEM_REPO_ROOT>\shared\global-rules\project-config-standard.md`
+12. `<DEVSYSTEM_REPO_ROOT>\shared\global-rules\windows-path-governance.md`
 13. `docs/governance/file-only-command-protocol.md`
 14. `docs/governance/requirements-to-tasks-rule.md`
 15. `docs/governance/requirements-engineering-standard.md`
@@ -58,18 +59,20 @@ Purpose: this is the live software-engineer execution entry in the external deve
 ## Allowed working area
 
 - development-system docs in this folder
-- development-system helper scripts in `D:\20251211\zhinengti\development-system\projects\houjinongfuai\tools`
-- business-code backend in `D:\20251211\zhinengti\houjinongfuai\backend`
-- business-code docs in `D:\20251211\zhinengti\houjinongfuai\docs` when the active task requires them
+- development-system helper scripts in `<PROJECT_DEV_ROOT>\tools`
+- business-code backend in `<BUSINESS_REPO_ROOT>\backend`
+- business-code docs in `<BUSINESS_REPO_ROOT>\docs` when the active task requires them
 
 ## Path rule
 
 - interpret `docs/codex/*` and `docs/governance/*` relative to this development-system workspace
-- interpret backend and business-doc paths relative to `D:\20251211\zhinengti\houjinongfuai`
-- for frontend `SYNC` or `VERIFY`, use `D:\20251211\zhinengti\lovable`
+- interpret backend and business-doc paths relative to `<BUSINESS_REPO_ROOT>`
+- for frontend `SYNC` or `VERIFY`, use `<FRONTEND_REPO_ROOT>`
 
 ## Execute now
 
+- On a brand-new machine, complete Git bootstrap first. See `docs/codex/REMOTE-FIRST-BOOTSTRAP.md`.
+- When dispatch DB is active, read the lane/task bootstrap from DB before trusting cached local task files.
 - Wait for PM to set `active task`.
 - If `active task = none`, report `no active task` and stop.
 - If `task type = none`, report `task type missing` and stop.

@@ -23,6 +23,7 @@ Live software-engineer work is dispatched through this development-system worksp
 - `docs/codex/RESULT.md`
 - `docs/codex/TASK-DISPATCH-TEMPLATE.md`
 - `docs/codex/ROLE-INIT-README.md`
+- `docs/codex/REMOTE-FIRST-BOOTSTRAP.md`
 - `docs/codex/WORK-MODES.md`
 - `docs/codex/TASK-TYPES.md`
 - `docs/codex/CLOUD-DEVELOPMENT-WORKFLOW.md`
@@ -48,6 +49,7 @@ Live software-engineer work is dispatched through this development-system worksp
 Preflight helper:
 
 - `tools/preflight.ps1`
+- `tools/bootstrap-from-remote.ps1`
 
 Business sync note still lives with the codebase:
 

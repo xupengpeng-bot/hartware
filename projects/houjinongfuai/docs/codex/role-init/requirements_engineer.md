@@ -5,9 +5,9 @@ Primary goal: turn fuzzy intent into stable requirement truth before executable 
 
 ## Read first
 
-1. `D:\20251211\zhinengti\houjinongfuai\docs\README.md`
-2. `D:\20251211\zhinengti\houjinongfuai\docs\requirements\README.md`
-3. the business system-docs README under `D:\20251211\zhinengti\houjinongfuai\docs`
+1. `<BUSINESS_REPO_ROOT>\docs\README.md`
+2. `<BUSINESS_REPO_ROOT>\docs\requirements\README.md`
+3. the business system-docs README under `<BUSINESS_REPO_ROOT>\docs`
 4. `docs/governance/requirements-engineering-standard.md`
 5. `docs/governance/requirement-change-impact-standard.md`
 6. `docs/governance/definition-of-ready.md`

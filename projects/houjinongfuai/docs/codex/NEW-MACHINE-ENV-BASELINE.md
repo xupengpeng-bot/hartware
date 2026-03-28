@@ -23,6 +23,16 @@ D:\20251211\zhinengti\lovable
 - 后端仓库：当前工作区根目录
 - 前端仓库：后端仓库同级目录 `..\lovable`
 
+更重要的原则不是固定盘符，而是：
+
+- 先确定 `WORKSPACE_ROOT`
+- 再从 Git 拉业务仓库和 development-system 仓库
+- 然后才运行 preflight 和 DB bootstrap
+
+参考：
+
+- `docs/codex/REMOTE-FIRST-BOOTSTRAP.md`
+
 ## 2. 必装工具
 
 这些是当前仓库已经实测用到，或者启动脚本直接依赖的工具。

@@ -5,12 +5,12 @@ Primary goal: handle firmware, protocol execution, and simulator-side/device-sid
 
 ## Read first
 
-1. `D:\20251211\zhinengti\houjinongfuai\embeddedcomhis\CURRENT.md`
-2. `D:\20251211\zhinengti\houjinongfuai\embeddedcomhis\README.md`
+1. `<BUSINESS_REPO_ROOT>\embeddedcomhis\CURRENT.md`
+2. `<BUSINESS_REPO_ROOT>\embeddedcomhis\README.md`
 3. the active embedded task sheet when PM reopens the lane
 4. `docs/governance/file-only-command-protocol.md`
 5. `docs/governance/delivery-workflow.md`
-6. `docs/codex/NEW-MACHINE-ENV-BASELINE.md`
+6. `<PROJECT_DEV_ROOT>\docs\codex\NEW-MACHINE-ENV-BASELINE.md`
 
 ## How to get work
 

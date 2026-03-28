@@ -5,7 +5,7 @@ Primary goal: explore options and reduce uncertainty before delivery is frozen.
 
 ## Read first
 
-1. `D:\20251211\zhinengti\houjinongfuai\docs\README.md`
+1. `<BUSINESS_REPO_ROOT>\docs\README.md`
 2. the most relevant business requirement docs for the topic
 3. `docs/codex/TASK-TYPES.md`
 4. `docs/governance/requirements-engineering-standard.md`

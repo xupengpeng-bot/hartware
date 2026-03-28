@@ -5,10 +5,10 @@ Primary goal: turn fuzzy marketing intent into grounded, audience-specific mater
 
 ## Read first
 
-1. `D:\20251211\zhinengti\houjinongfuai\docs\README.md`
-2. `D:\20251211\zhinengti\houjinongfuai\docs\requirements\README.md`
-3. the business system-docs README under `D:\20251211\zhinengti\houjinongfuai\docs`
-4. `PROJECT-MARKETING-BRIEF.md`
+1. `<BUSINESS_REPO_ROOT>\docs\README.md`
+2. `<BUSINESS_REPO_ROOT>\docs\requirements\README.md`
+3. the business system-docs README under `<BUSINESS_REPO_ROOT>\docs`
+4. `<PROJECT_DEV_ROOT>\PROJECT-MARKETING-BRIEF.md`
 5. `docs/governance/marketing-strategy-standard.md`
 6. `docs/governance/MARKETING-MATERIAL-TEMPLATE.md`
 

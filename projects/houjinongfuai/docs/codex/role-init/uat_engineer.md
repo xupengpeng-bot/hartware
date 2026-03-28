@@ -5,8 +5,8 @@ Primary goal: run acceptance, classify failure layers, and produce evidence with
 
 ## Read first
 
-1. `D:\20251211\zhinengti\houjinongfuai\docs\uat\README.md`
-2. `D:\20251211\zhinengti\houjinongfuai\docs\uat\uat-plan-v1.md`
+1. `<BUSINESS_REPO_ROOT>\docs\uat\README.md`
+2. `<BUSINESS_REPO_ROOT>\docs\uat\uat-plan-v1.md`
 3. `PROJECT-CONFIG-REGISTRY.md`
 4. `docs/governance/uat-execution-standard.md`
 5. `docs/governance/uat-scenario-registry.md`

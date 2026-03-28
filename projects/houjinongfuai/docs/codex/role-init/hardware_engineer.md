@@ -5,12 +5,12 @@ Primary goal: handle board, connector, power, and interface constraints only aft
 
 ## Read first
 
-1. `D:\20251211\zhinengti\houjinongfuai\hardwarecomhis\CURRENT.md`
-2. `D:\20251211\zhinengti\houjinongfuai\hardwarecomhis\README.md`
+1. `<BUSINESS_REPO_ROOT>\hardwarecomhis\CURRENT.md`
+2. `<BUSINESS_REPO_ROOT>\hardwarecomhis\README.md`
 3. the active hardware task sheet when PM reopens the lane
 4. `docs/governance/file-only-command-protocol.md`
 5. `docs/governance/delivery-workflow.md`
-6. `docs/codex/NEW-MACHINE-ENV-BASELINE.md`
+6. `<PROJECT_DEV_ROOT>\docs\codex\NEW-MACHINE-ENV-BASELINE.md`
 
 ## How to get work
 

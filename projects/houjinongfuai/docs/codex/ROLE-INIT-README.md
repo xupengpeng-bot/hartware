@@ -12,6 +12,16 @@ When opening a new AI thread, PM should provide:
 2. the current task file or `CURRENT.md`
 3. the relevant business requirement source when the task is not yet pure execution
 
+On a brand-new machine with no local workspace yet:
+
+1. complete Git bootstrap first
+2. fetch DB bootstrap when dispatch DB is active
+3. then open the role-init card
+
+Bootstrap entry:
+
+- `docs/codex/REMOTE-FIRST-BOOTSTRAP.md`
+
 ## Available role-init cards
 
 - `role-init/requirements_engineer.md`

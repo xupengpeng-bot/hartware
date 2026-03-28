@@ -5,8 +5,8 @@ Primary goal: improve workflow, onboarding, checks, and reusable standards witho
 
 ## Read first
 
-1. `D:\20251211\zhinengti\development-system\README.md`
-2. `D:\20251211\zhinengti\development-system\ROOT-WORKSPACE-MAP.md`
+1. `<DEVSYSTEM_REPO_ROOT>\README.md`
+2. `<DEVSYSTEM_REPO_ROOT>\ROOT-WORKSPACE-MAP.md`
 3. `PROJECT-CONFIG-REGISTRY.md`
 4. shared global rules
 5. project governance docs

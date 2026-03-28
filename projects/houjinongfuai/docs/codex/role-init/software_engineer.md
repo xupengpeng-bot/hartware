@@ -5,8 +5,8 @@ Primary goal: execute the active engineering task without drifting into requirem
 
 ## Read first
 
-1. `D:\20251211\zhinengti\houjinongfuai\AGENTS.md`
-2. `D:\20251211\zhinengti\houjinongfuai\docs\README.md`
+1. `<BUSINESS_REPO_ROOT>\AGENTS.md`
+2. `<BUSINESS_REPO_ROOT>\docs\README.md`
 3. `PROJECT-CONFIG-REGISTRY.md`
 4. `docs/codex/CURRENT.md`
 5. `docs/codex/WORK-MODES.md`
@@ -18,6 +18,8 @@ Primary goal: execute the active engineering task without drifting into requirem
 
 ## How to get work
 
+- On a new machine with no local repositories yet, complete `REMOTE-FIRST-BOOTSTRAP.md` first.
+- When dispatch DB is enabled, fetch the live lane/task state from DB before trusting cached local task files.
 - Use `CURRENT.md` as the execution gate.
 - If `active task = none`, report `no active task` and stop.
 - If `task type = none`, report `task type missing` and stop.

@@ -6,12 +6,15 @@ Purpose: provide one stable lookup point for project configuration, startup surf
 
 ## Workspace anchors
 
-- business-code workspace:
-  - `D:\20251211\zhinengti\houjinongfuai`
-- development-system workspace:
-  - `D:\20251211\zhinengti\development-system\projects\houjinongfuai`
-- frontend workspace:
-  - `D:\20251211\zhinengti\lovable`
+Use workspace-relative anchors on each machine:
+
+- `WORKSPACE_ROOT`
+- `BUSINESS_REPO_ROOT = <WORKSPACE_ROOT>\houjinongfuai`
+- `DEVSYSTEM_REPO_ROOT = <WORKSPACE_ROOT>\development-system`
+- `PROJECT_DEV_ROOT = <DEVSYSTEM_REPO_ROOT>\projects\houjinongfuai`
+- `FRONTEND_REPO_ROOT = <WORKSPACE_ROOT>\lovable`
+
+Do not assume the same drive letter or parent path as another machine.
 
 ## Active repositories
 
@@ -58,7 +61,7 @@ Primary key groups:
 - template:
   - `D:\20251211\zhinengti\lovable\.env.example`
 - local file:
-  - `D:\20251211\zhinengti\lovable\.env`
+  - `<FRONTEND_REPO_ROOT>\.env`
 
 Primary key groups:
 
@@ -101,6 +104,32 @@ This is optional and disabled by default.
   - dispatch read or write mirror for bootstrap and workflow support
 
 ## Startup scripts
+
+## Git bootstrap remotes
+
+- business repository:
+  - `https://github.com/xupengpeng-bot/houjinongfuai.git`
+- development-system repository:
+  - `https://github.com/xupengpeng-bot/development-system.git`
+- frontend repository:
+  - PM-provided remote when frontend work is required
+
+## DB bootstrap
+
+When dispatch DB is active, use DB bootstrap to obtain the live lane and active task after Git bootstrap.
+
+Preferred direct helper:
+
+- `python <BUSINESS_REPO_ROOT>\backend\scripts\dispatch_bootstrap_fetch.py --team software_engineer`
+
+The DB bootstrap should be treated as live task-state truth for:
+
+- team lane
+- active task id
+- task type
+- mode
+- status
+- optional execute-now summary
 
 ### Backend startup
 
@@ -222,13 +251,15 @@ Windows-specific guards:
 
 When startup or verification fails, use this order:
 
-1. run `.\tools\preflight.ps1`
-2. confirm you are in the correct workspace roots
-3. confirm the expected `.env` files exist
-4. confirm ports and DB targets from `.env.example`
-5. confirm Docker and DB container availability
-6. confirm Git workspace cleanliness and branch state
-7. then inspect the specific startup script or failing command
+1. confirm Git bootstrap completed and the repositories are in the intended workspace root
+2. run `.\tools\preflight.ps1`
+3. confirm you are in the correct workspace roots
+4. confirm the expected `.env` files exist
+5. confirm ports and DB targets from `.env.example`
+6. confirm Docker and DB container availability
+7. confirm Git workspace cleanliness and branch state
+8. when dispatch DB is active, confirm DB bootstrap returns the intended lane/task state
+9. then inspect the specific startup script or failing command
 
 ## Ownership
 

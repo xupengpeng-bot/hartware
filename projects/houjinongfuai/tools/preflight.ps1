@@ -75,6 +75,7 @@ $CurrentFile = Join-Path $ProjectRoot 'docs\codex\CURRENT.md'
 $ResultFile = Join-Path $ProjectRoot 'docs\codex\RESULT.md'
 $TaskTypesFile = Join-Path $ProjectRoot 'docs\codex\TASK-TYPES.md'
 $TaskDispatchTemplateFile = Join-Path $ProjectRoot 'docs\codex\TASK-DISPATCH-TEMPLATE.md'
+$RemoteBootstrapFile = Join-Path $ProjectRoot 'docs\codex\REMOTE-FIRST-BOOTSTRAP.md'
 $RoleInitReadme = Join-Path $ProjectRoot 'docs\codex\ROLE-INIT-README.md'
 $RoleInitRoot = Join-Path $ProjectRoot 'docs\codex\role-init'
 $ProjectConfigRegistry = Join-Path $ProjectRoot 'PROJECT-CONFIG-REGISTRY.md'
@@ -115,6 +116,7 @@ Test-RequiredPath -Name 'current file' -Path $CurrentFile
 Test-RequiredPath -Name 'result file' -Path $ResultFile
 Test-RequiredPath -Name 'task types file' -Path $TaskTypesFile
 Test-RequiredPath -Name 'task dispatch template' -Path $TaskDispatchTemplateFile
+Test-RequiredPath -Name 'remote-first bootstrap file' -Path $RemoteBootstrapFile
 Test-RequiredPath -Name 'role init readme' -Path $RoleInitReadme
 Test-RequiredPath -Name 'role init root' -Path $RoleInitRoot
 Test-RequiredPath -Name 'project config registry' -Path $ProjectConfigRegistry

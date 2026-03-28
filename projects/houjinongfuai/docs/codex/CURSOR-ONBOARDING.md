@@ -6,17 +6,18 @@ Purpose: make Cursor productive for this project through the external developmen
 
 ## 1. Workspace split
 
-Development-system workspace:
+Use workspace-relative anchors:
 
-- `D:\20251211\zhinengti\development-system\projects\houjinongfuai`
+- `WORKSPACE_ROOT`
+- `DEVSYSTEM_REPO_ROOT = <WORKSPACE_ROOT>\development-system`
+- `PROJECT_DEV_ROOT = <DEVSYSTEM_REPO_ROOT>\projects\houjinongfuai`
+- `BUSINESS_REPO_ROOT = <WORKSPACE_ROOT>\houjinongfuai`
+- `FRONTEND_REPO_ROOT = <WORKSPACE_ROOT>\lovable`
 
-Backend business-code workspace:
+If the repositories do not exist locally yet, bootstrap from Git first using:
 
-- `D:\20251211\zhinengti\houjinongfuai`
-
-Frontend workspace:
-
-- `D:\20251211\zhinengti\lovable`
+- `docs/codex/REMOTE-FIRST-BOOTSTRAP.md`
+- `tools/bootstrap-from-remote.ps1`
 
 ## 2. Your role
 
@@ -55,17 +56,17 @@ You must obey these repository-level rules:
 Always read in this order:
 
 1. `D:\20251211\zhinengti\houjinongfuai\AGENTS.md`
-2. `D:\20251211\zhinengti\houjinongfuai\docs\README.md`
+2. `<BUSINESS_REPO_ROOT>\docs\README.md`
 3. `PROJECT-CONFIG-REGISTRY.md`
 4. `docs/codex/CURRENT.md`
 5. `docs/codex/WORK-MODES.md`
 6. `docs/codex/TASK-TYPES.md`
-7. `D:\20251211\zhinengti\development-system\shared\global-rules\task-taxonomy-matrix.md`
-8. `D:\20251211\zhinengti\development-system\shared\global-rules\role-lane-catalog.md`
-9. `D:\20251211\zhinengti\development-system\shared\global-rules\encoding-governance.md`
-10. `D:\20251211\zhinengti\development-system\shared\global-rules\development-system-evolution-rule.md`
-11. `D:\20251211\zhinengti\development-system\shared\global-rules\project-config-standard.md`
-12. `D:\20251211\zhinengti\development-system\shared\global-rules\windows-path-governance.md`
+7. `<DEVSYSTEM_REPO_ROOT>\shared\global-rules\task-taxonomy-matrix.md`
+8. `<DEVSYSTEM_REPO_ROOT>\shared\global-rules\role-lane-catalog.md`
+9. `<DEVSYSTEM_REPO_ROOT>\shared\global-rules\encoding-governance.md`
+10. `<DEVSYSTEM_REPO_ROOT>\shared\global-rules\development-system-evolution-rule.md`
+11. `<DEVSYSTEM_REPO_ROOT>\shared\global-rules\project-config-standard.md`
+12. `<DEVSYSTEM_REPO_ROOT>\shared\global-rules\windows-path-governance.md`
 13. `docs/governance/file-only-command-protocol.md`
 14. `docs/governance/requirements-to-tasks-rule.md`
 15. `docs/governance/requirements-engineering-standard.md`
@@ -88,9 +89,9 @@ If you are opening a fresh thread for a non-software-engineer role, also read:
 
 If the task touches frontend coordination, also read:
 
-1. `D:\20251211\zhinengti\lovable\lovablecomhis\LOVABLE-PERMANENT-RULES.md`
-2. `D:\20251211\zhinengti\lovable\lovablecomhis\CURRENT.md`
-3. `D:\20251211\zhinengti\lovable\lovablecomhis\WAVE.md`
+1. `<FRONTEND_REPO_ROOT>\lovablecomhis\LOVABLE-PERMANENT-RULES.md`
+2. `<FRONTEND_REPO_ROOT>\lovablecomhis\CURRENT.md`
+3. `<FRONTEND_REPO_ROOT>\lovablecomhis\WAVE.md`
 
 Files are the source of truth. Chat text is not.
 
@@ -124,6 +125,7 @@ Lovable owns:
 Dispatch hard gate:
 
 - Do not execute from chat alone.
+- On a new machine, do not execute before Git bootstrap and, when enabled, DB bootstrap.
 - If `CURRENT.md` does not explicitly name the active task, task type, mode, and execute-now instruction, treat the task as not dispatched.
 - Reporting `no active task` in this case is the correct behavior.
 - If you discover a better workflow, script, encoding guardrail, or reusable check during delivery, report it as a development-system improvement candidate instead of silently changing the system scope.
