@@ -17,6 +17,7 @@ Purpose: describe the live software-engineer execution entry and fixed work mode
 
 Live software-engineer work is dispatched through this development-system workspace:
 
+- `PROJECT-CONFIG-REGISTRY.md`
 - `docs/codex/CURRENT.md`
 - `docs/codex/RESULT.md`
 - `docs/codex/WORK-MODES.md`
@@ -26,6 +27,7 @@ Live software-engineer work is dispatched through this development-system worksp
 - `docs/governance/delivery-workflow.md`
 - `D:\20251211\zhinengti\development-system\shared\global-rules\encoding-governance.md`
 - `D:\20251211\zhinengti\development-system\shared\global-rules\development-system-evolution-rule.md`
+- `D:\20251211\zhinengti\development-system\shared\global-rules\project-config-standard.md`
 - `D:\20251211\zhinengti\development-system\shared\global-rules\windows-path-governance.md`
 
 Preflight helper:

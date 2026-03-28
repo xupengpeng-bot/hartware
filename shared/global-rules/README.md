@@ -10,6 +10,7 @@ Purpose: hold shared development-system rules that are not business-specific.
 - `task-taxonomy-matrix.md`
 - `encoding-governance.md`
 - `development-system-evolution-rule.md`
+- `project-config-standard.md`
 - `windows-path-governance.md`
 - `change-log.md`
 

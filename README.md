@@ -16,6 +16,16 @@ Purpose: keep development-system assets separate from business repositories.
 - `projects/houjinongfuai`
   - development-system workspace for the `houjinongfuai` project
 
+## Root workspace map
+
+- `ROOT-WORKSPACE-MAP.md`
+  - root-level workspace classification for formal, sidecar, and temporary directories
+
+## Shared project-config rule
+
+- `shared/global-rules/project-config-standard.md`
+  - project config registry standard for active projects
+
 ## Shared rules
 
 - `shared/global-rules`

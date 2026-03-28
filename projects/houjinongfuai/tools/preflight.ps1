@@ -74,6 +74,7 @@ function Test-TextForReplacementChar {
 $CurrentFile = Join-Path $ProjectRoot 'docs\codex\CURRENT.md'
 $ResultFile = Join-Path $ProjectRoot 'docs\codex\RESULT.md'
 $TaskTypesFile = Join-Path $ProjectRoot 'docs\codex\TASK-TYPES.md'
+$ProjectConfigRegistry = Join-Path $ProjectRoot 'PROJECT-CONFIG-REGISTRY.md'
 $ReadyFile = Join-Path $ProjectRoot 'docs\governance\definition-of-ready.md'
 $ReqRuleFile = Join-Path $ProjectRoot 'docs\governance\requirements-to-tasks-rule.md'
 $BusinessAgents = Join-Path $BusinessRoot 'AGENTS.md'
@@ -82,6 +83,7 @@ $BusinessRulesFile = Join-Path $BusinessRoot 'docs\README.md'
 $SharedTaxonomy = Join-Path $DevSystemRoot 'shared\global-rules\task-taxonomy-matrix.md'
 $SharedEncoding = Join-Path $DevSystemRoot 'shared\global-rules\encoding-governance.md'
 $SharedEvolution = Join-Path $DevSystemRoot 'shared\global-rules\development-system-evolution-rule.md'
+$SharedProjectConfigStandard = Join-Path $DevSystemRoot 'shared\global-rules\project-config-standard.md'
 $SharedWindowsPath = Join-Path $DevSystemRoot 'shared\global-rules\windows-path-governance.md'
 
 Test-RequiredPath -Name 'development-system project root' -Path $ProjectRoot
@@ -97,6 +99,7 @@ else {
 Test-RequiredPath -Name 'current file' -Path $CurrentFile
 Test-RequiredPath -Name 'result file' -Path $ResultFile
 Test-RequiredPath -Name 'task types file' -Path $TaskTypesFile
+Test-RequiredPath -Name 'project config registry' -Path $ProjectConfigRegistry
 Test-RequiredPath -Name 'definition of ready file' -Path $ReadyFile
 Test-RequiredPath -Name 'requirements-to-tasks file' -Path $ReqRuleFile
 Test-RequiredPath -Name 'business AGENTS' -Path $BusinessAgents
@@ -105,6 +108,7 @@ Test-RequiredPath -Name 'business product rules' -Path $BusinessRulesFile
 Test-RequiredPath -Name 'shared taxonomy rule' -Path $SharedTaxonomy
 Test-RequiredPath -Name 'shared encoding rule' -Path $SharedEncoding
 Test-RequiredPath -Name 'shared evolution rule' -Path $SharedEvolution
+Test-RequiredPath -Name 'shared project-config standard' -Path $SharedProjectConfigStandard
 Test-RequiredPath -Name 'shared windows-path rule' -Path $SharedWindowsPath
 
 Test-OptionalCommand -CommandName 'git' -Level 'FAIL'

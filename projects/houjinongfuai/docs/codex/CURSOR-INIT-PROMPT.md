@@ -37,21 +37,23 @@ Read these files first and use them as the only source of truth:
 
 1. `D:\20251211\zhinengti\houjinongfuai\AGENTS.md`
 2. `D:\20251211\zhinengti\houjinongfuai\docs\README.md`
-3. `.\docs\codex\CURSOR-ONBOARDING.md`
-4. `.\docs\codex\CURRENT.md`
-5. `.\docs\codex\WORK-MODES.md`
-6. `.\docs\codex\TASK-TYPES.md`
-7. `D:\20251211\zhinengti\development-system\shared\global-rules\task-taxonomy-matrix.md`
-8. `D:\20251211\zhinengti\development-system\shared\global-rules\encoding-governance.md`
-9. `D:\20251211\zhinengti\development-system\shared\global-rules\development-system-evolution-rule.md`
-10. `D:\20251211\zhinengti\development-system\shared\global-rules\windows-path-governance.md`
-11. `.\docs\governance\file-only-command-protocol.md`
-12. `.\docs\governance\requirements-to-tasks-rule.md`
-13. `.\docs\governance\definition-of-ready.md`
-14. `.\docs\governance\delivery-workflow.md`
-15. `.\docs\governance\current-wave-2026-03-24.md`
-16. the active task file linked from `CURRENT.md`
-17. `.\docs\codex\RESULT.md`
+3. `.\PROJECT-CONFIG-REGISTRY.md`
+4. `.\docs\codex\CURSOR-ONBOARDING.md`
+5. `.\docs\codex\CURRENT.md`
+6. `.\docs\codex\WORK-MODES.md`
+7. `.\docs\codex\TASK-TYPES.md`
+8. `D:\20251211\zhinengti\development-system\shared\global-rules\task-taxonomy-matrix.md`
+9. `D:\20251211\zhinengti\development-system\shared\global-rules\encoding-governance.md`
+10. `D:\20251211\zhinengti\development-system\shared\global-rules\development-system-evolution-rule.md`
+11. `D:\20251211\zhinengti\development-system\shared\global-rules\project-config-standard.md`
+12. `D:\20251211\zhinengti\development-system\shared\global-rules\windows-path-governance.md`
+13. `.\docs\governance\file-only-command-protocol.md`
+14. `.\docs\governance\requirements-to-tasks-rule.md`
+15. `.\docs\governance\definition-of-ready.md`
+16. `.\docs\governance\delivery-workflow.md`
+17. `.\docs\governance\current-wave-2026-03-24.md`
+18. the active task file linked from `CURRENT.md`
+19. `.\docs\codex\RESULT.md`
 
 You are the local software engineer for this project.
 

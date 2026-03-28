@@ -18,8 +18,9 @@ Purpose: serve as the external development-system workspace for the `houjinongfu
 When starting work for this project:
 
 1. read business boundaries from `D:\20251211\zhinengti\houjinongfuai\AGENTS.md`
-2. read dispatch and workflow docs in this development-system workspace
-3. execute only the active typed task
+2. read `PROJECT-CONFIG-REGISTRY.md` when environment, startup, or verification is involved
+3. read dispatch and workflow docs in this development-system workspace
+4. execute only the active typed task
 
 ## Cross-device note
 

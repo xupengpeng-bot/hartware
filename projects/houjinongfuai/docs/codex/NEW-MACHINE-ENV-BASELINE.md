@@ -428,7 +428,11 @@ cd D:\20251211\zhinengti\development-system\projects\houjinongfuai
 .\tools\preflight.ps1
 ```
 
-通过后再开始读取 `CURRENT.md` 和 active task。
+通过后先读取：
+
+- `PROJECT-CONFIG-REGISTRY.md`
+
+再开始读取 `CURRENT.md` 和 active task。
 
 如果需要前端联调，再确认：
 
