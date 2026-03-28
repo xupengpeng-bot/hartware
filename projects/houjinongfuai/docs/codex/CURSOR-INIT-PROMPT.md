@@ -76,6 +76,7 @@ You must obey these rules:
 - frontend must not directly call third-party business or geoservice endpoints unless PM explicitly freezes an exception
 - if queue state and entry files disagree, stop and report the mismatch
 - if you detect repeated dispatch with no real state change, report a logic-loop risk immediately
+- treat `COD-*.md` task sheets as historical records unless `CURRENT.md` explicitly routes you to one
 - if you discover a better workflow, encoding guardrail, or reusable check during delivery, report it as a development-system improvement candidate instead of silently expanding the active task
 
 Your output after every run must include:

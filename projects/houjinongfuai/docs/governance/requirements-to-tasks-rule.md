@@ -15,7 +15,7 @@ They must stay physically and logically separate.
 Business requirement docs belong in the business repository:
 
 - `D:\20251211\zhinengti\houjinongfuai\docs\requirements`
-- `D:\20251211\zhinengti\houjinongfuai\docs\系统说明`
+- the business system-docs tree linked from `D:\20251211\zhinengti\houjinongfuai\docs\README.md`
 - `D:\20251211\zhinengti\houjinongfuai\docs\p1`
 - `D:\20251211\zhinengti\houjinongfuai\docs\protocol`
 - `D:\20251211\zhinengti\houjinongfuai\docs\uat`

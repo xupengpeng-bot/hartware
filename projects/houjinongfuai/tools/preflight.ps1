@@ -74,12 +74,18 @@ function Test-TextForReplacementChar {
 $CurrentFile = Join-Path $ProjectRoot 'docs\codex\CURRENT.md'
 $ResultFile = Join-Path $ProjectRoot 'docs\codex\RESULT.md'
 $TaskTypesFile = Join-Path $ProjectRoot 'docs\codex\TASK-TYPES.md'
+$TaskDispatchTemplateFile = Join-Path $ProjectRoot 'docs\codex\TASK-DISPATCH-TEMPLATE.md'
 $ProjectConfigRegistry = Join-Path $ProjectRoot 'PROJECT-CONFIG-REGISTRY.md'
+$ProjectMarketingBrief = Join-Path $ProjectRoot 'PROJECT-MARKETING-BRIEF.md'
 $ReadyFile = Join-Path $ProjectRoot 'docs\governance\definition-of-ready.md'
 $ReqRuleFile = Join-Path $ProjectRoot 'docs\governance\requirements-to-tasks-rule.md'
 $ReqEngineeringFile = Join-Path $ProjectRoot 'docs\governance\requirements-engineering-standard.md'
+$ReqChangeTemplateFile = Join-Path $ProjectRoot 'docs\governance\REQUIREMENT-CHANGE-TEMPLATE.md'
+$MarketingStandardFile = Join-Path $ProjectRoot 'docs\governance\marketing-strategy-standard.md'
+$MarketingTemplateFile = Join-Path $ProjectRoot 'docs\governance\MARKETING-MATERIAL-TEMPLATE.md'
 $RoleBasedModelFile = Join-Path $ProjectRoot 'docs\governance\role-based-delivery-model.md'
 $UatExecutionFile = Join-Path $ProjectRoot 'docs\governance\uat-execution-standard.md'
+$UatEvidenceTemplateFile = Join-Path $ProjectRoot 'docs\governance\UAT-EVIDENCE-TEMPLATE.md'
 $UatProblemMapFile = Join-Path $ProjectRoot 'docs\governance\uat-problem-solving-map.md'
 $UatScenarioRegistryFile = Join-Path $ProjectRoot 'docs\governance\uat-scenario-registry.md'
 $DeviceSimulationRegistryFile = Join-Path $ProjectRoot 'docs\governance\device-simulation-registry.md'
@@ -106,12 +112,18 @@ else {
 Test-RequiredPath -Name 'current file' -Path $CurrentFile
 Test-RequiredPath -Name 'result file' -Path $ResultFile
 Test-RequiredPath -Name 'task types file' -Path $TaskTypesFile
+Test-RequiredPath -Name 'task dispatch template' -Path $TaskDispatchTemplateFile
 Test-RequiredPath -Name 'project config registry' -Path $ProjectConfigRegistry
+Test-RequiredPath -Name 'project marketing brief' -Path $ProjectMarketingBrief
 Test-RequiredPath -Name 'definition of ready file' -Path $ReadyFile
 Test-RequiredPath -Name 'requirements-to-tasks file' -Path $ReqRuleFile
 Test-RequiredPath -Name 'requirements-engineering standard' -Path $ReqEngineeringFile
+Test-RequiredPath -Name 'requirement-change template' -Path $ReqChangeTemplateFile
+Test-RequiredPath -Name 'marketing strategy standard' -Path $MarketingStandardFile
+Test-RequiredPath -Name 'marketing material template' -Path $MarketingTemplateFile
 Test-RequiredPath -Name 'role-based delivery model' -Path $RoleBasedModelFile
 Test-RequiredPath -Name 'UAT execution standard' -Path $UatExecutionFile
+Test-RequiredPath -Name 'UAT evidence template' -Path $UatEvidenceTemplateFile
 Test-RequiredPath -Name 'UAT problem-solving map' -Path $UatProblemMapFile
 Test-RequiredPath -Name 'UAT scenario registry' -Path $UatScenarioRegistryFile
 Test-RequiredPath -Name 'device simulation registry' -Path $DeviceSimulationRegistryFile
@@ -134,8 +146,12 @@ Test-OptionalCommand -CommandName 'arm-none-eabi-gcc' -Level 'WARN'
 Test-OptionalCommand -CommandName 'openocd' -Level 'WARN'
 
 Test-TextForReplacementChar -Name 'encoding:CURRENT.md' -Path $CurrentFile
+Test-TextForReplacementChar -Name 'encoding:RESULT.md' -Path $ResultFile
 Test-TextForReplacementChar -Name 'encoding:definition-of-ready' -Path $ReadyFile
 Test-TextForReplacementChar -Name 'encoding:requirements-to-tasks' -Path $ReqRuleFile
+Test-TextForReplacementChar -Name 'encoding:requirements-engineering-standard' -Path $ReqEngineeringFile
+Test-TextForReplacementChar -Name 'encoding:marketing-strategy-standard' -Path $MarketingStandardFile
+Test-TextForReplacementChar -Name 'encoding:project-marketing-brief' -Path $ProjectMarketingBrief
 Test-TextForReplacementChar -Name 'encoding:business AGENTS' -Path $BusinessAgents
 Test-TextForReplacementChar -Name 'encoding:business product rules' -Path $BusinessRulesFile
 
@@ -271,11 +287,12 @@ $statusOrder = @{
 $sortedChecks = $Checks | Sort-Object @{ Expression = { $statusOrder[$_.Status] } }, Name
 $sortedChecks | Format-Table -AutoSize
 
-$failCount = ($Checks | Where-Object { $_.Status -eq 'FAIL' }).Count
-$warnCount = ($Checks | Where-Object { $_.Status -eq 'WARN' }).Count
+$passCount = ($Checks | Where-Object { $_.Status -eq 'PASS' } | Measure-Object).Count
+$failCount = ($Checks | Where-Object { $_.Status -eq 'FAIL' } | Measure-Object).Count
+$warningCount = ($Checks | Where-Object { $_.Status -eq 'WARN' } | Measure-Object).Count
 
 Write-Host ""
-Write-Host ("Summary: {0} pass, {1} warn, {2} fail" -f (($Checks | Where-Object { $_.Status -eq 'PASS' }).Count), $warnCount, $failCount)
+Write-Host ("Summary: {0} pass, {1} warn, {2} fail" -f $passCount, $warningCount, $failCount)
 
 if ($failCount -gt 0) {
     exit 1

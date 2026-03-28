@@ -19,19 +19,19 @@ But the output must still be grounded in:
 
 Examples:
 
-- "帮我想一个营销方案"
-- "看看怎么对外介绍这个项目"
-- "给商务一套可讲的卖点"
-- "针对某类客户整理一版材料"
+- "help me shape a marketing plan"
+- "how should we introduce this project externally"
+- "give me a sellable set of core talking points"
+- "prepare one version of material for a specific audience"
 
 These are valid starting points.
 
 ## Required reading order for marketing work
 
 1. `D:\20251211\zhinengti\houjinongfuai\docs\README.md`
-2. `D:\20251211\zhinengti\houjinongfuai\docs\系统说明\系统业务总览简版.md`
-3. `D:\20251211\zhinengti\houjinongfuai\docs\系统说明\系统整体业务需求.md`
-4. `D:\20251211\zhinengti\houjinongfuai\docs\系统说明\需求拆解.md`
+2. `D:\20251211\zhinengti\houjinongfuai\docs\requirements\README.md`
+3. the business system-docs README under `D:\20251211\zhinengti\houjinongfuai\docs`
+4. the relevant business overview / overall requirement / requirement-breakdown docs linked from the system-docs README
 5. `PROJECT-MARKETING-BRIEF.md`
 6. relevant execution history or current milestone notes when the material depends on delivery status
 

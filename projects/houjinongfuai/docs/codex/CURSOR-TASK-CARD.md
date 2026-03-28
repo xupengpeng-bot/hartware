@@ -10,17 +10,16 @@ Priority: P0 / P1 / P2
 
 1. Read these files first
 1. ./AGENTS.md
-2. ./docs/codex/CURSOR-ONBOARDING.md
-3. ./docs/系统说明/通用产品规则.md
-4. ./docs/系统说明/系统业务总览简版.md
-5. ./docs/系统说明/系统整体业务需求.md
-6. ./docs/系统说明/需求拆解.md
-7. ./docs/codex/CURRENT.md
-8. ./docs/codex/WORK-MODES.md
-9. ./docs/governance/file-only-command-protocol.md
-10. ./docs/governance/delivery-workflow.md
-11. the current task file
-12. ./docs/codex/RESULT.md
+2. ./docs/README.md
+3. ./docs/requirements/README.md
+4. the business system-docs README and the relevant linked business docs
+5. ./docs/codex/CURSOR-ONBOARDING.md
+6. ./docs/codex/CURRENT.md
+7. ./docs/codex/WORK-MODES.md
+8. ./docs/governance/file-only-command-protocol.md
+9. ./docs/governance/delivery-workflow.md
+10. the current task file
+11. ./docs/codex/RESULT.md
 
 Frontend repo rule:
 - default frontend repo path is ../lovable
@@ -40,14 +39,15 @@ Out of scope:
 1. Only execute the current task pointed to by CURRENT.md.
 2. Files are the source of truth. Do not guess from old chat context.
 3. If CURRENT.md does not contain active task / work mode / execute-now, treat the task as not dispatched and stop.
-4. Follow the work mode strictly:
+4. Treat `COD-*.md` task sheets as historical records unless CURRENT.md explicitly points to them.
+5. Follow the work mode strictly:
    - BACKEND: backend implementation, migrations, tests, contract stabilization
    - SYNC: sync only frontend handoff files into frontend Git main
    - VERIFY: local pull, build, and acceptance only; do not patch missing behavior locally
-5. Do not mix SYNC and VERIFY.
-6. Frontend may call only NestJS API.
-7. Frontend must not directly call third-party business or geoservice endpoints unless PM freezes an exception.
-8. Do not expand scope or reopen architecture.
+6. Do not mix SYNC and VERIFY.
+7. Frontend may call only NestJS API.
+8. Frontend must not directly call third-party business or geoservice endpoints unless PM freezes an exception.
+9. Do not expand scope or reopen architecture.
 
 5. Working area
 Backend repo:

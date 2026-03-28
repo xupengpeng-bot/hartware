@@ -73,6 +73,7 @@ Purpose: this is the live software-engineer execution entry in the external deve
 - Wait for PM to set `active task`.
 - If `active task = none`, report `no active task` and stop.
 - If `task type = none`, report `task type missing` and stop.
+- Treat `COD-*.md` files in this folder as historical records unless `CURRENT.md` points to one.
 - Do not treat chat discussion, architecture discussion, governance discussion, or curiosity questions as executable work unless PM freezes them into the active task files.
 - If a task reveals a useful process or tooling improvement, report it as a development-system improvement candidate instead of silently expanding scope.
 

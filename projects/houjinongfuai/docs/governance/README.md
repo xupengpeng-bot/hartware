@@ -18,9 +18,12 @@ Use this folder for:
 - requirement-to-task decomposition rules
 - requirements-engineering standard
 - requirement-change impact standard
+- requirement-change template
 - role-based delivery model
 - marketing strategy standard
+- marketing-material template
 - definition-of-ready
 - project-specific preflight and execution helpers
 - UAT execution standards
+- UAT evidence template
 - UAT troubleshooting and simulation maps

@@ -73,7 +73,7 @@ Every executable task should provide at least:
 ### Ready example
 
 - requirement source:
-  - `D:\20251211\zhinengti\houjinongfuai\docs\系统说明\需求拆解.md`
+  - a requirement doc linked from `D:\20251211\zhinengti\houjinongfuai\docs\README.md`
 - task type:
   - `ENGINEERING`
 - task category:
@@ -91,7 +91,7 @@ This is ready.
 ### Not ready example
 
 - requirement source is missing
-- task says only "继续完善这个"
+- task says only "keep improving this"
 - no mode
 - no verification basis
 

@@ -21,6 +21,7 @@ Live software-engineer work is dispatched through this development-system worksp
 - `PROJECT-MARKETING-BRIEF.md`
 - `docs/codex/CURRENT.md`
 - `docs/codex/RESULT.md`
+- `docs/codex/TASK-DISPATCH-TEMPLATE.md`
 - `docs/codex/WORK-MODES.md`
 - `docs/codex/TASK-TYPES.md`
 - `docs/codex/CLOUD-DEVELOPMENT-WORKFLOW.md`
@@ -31,6 +32,9 @@ Live software-engineer work is dispatched through this development-system worksp
 - `docs/governance/requirement-change-impact-standard.md`
 - `docs/governance/role-based-delivery-model.md`
 - `docs/governance/marketing-strategy-standard.md`
+- `docs/governance/REQUIREMENT-CHANGE-TEMPLATE.md`
+- `docs/governance/UAT-EVIDENCE-TEMPLATE.md`
+- `docs/governance/MARKETING-MATERIAL-TEMPLATE.md`
 - `docs/governance/uat-execution-standard.md`
 - `docs/governance/uat-scenario-registry.md`
 - `docs/governance/device-simulation-registry.md`
@@ -47,5 +51,12 @@ Preflight helper:
 Business sync note still lives with the codebase:
 
 - `D:\20251211\zhinengti\houjinongfuai\docs\uat\lovable-codex-sync.md`
+
+## Historical task rule
+
+- `CURRENT.md`, `RESULT.md`, and the shared/global rules are the active entry chain.
+- `COD-*.md` files in this folder are historical task sheets.
+- Do not read historical task sheets unless `CURRENT.md` or PM explicitly points to one.
+- Use the template files when creating new tasks or reusable evidence instead of copying historical task sheets.
 
 When PM or the user says only "execute", software engineer must read this folder's `CURRENT.md` first.

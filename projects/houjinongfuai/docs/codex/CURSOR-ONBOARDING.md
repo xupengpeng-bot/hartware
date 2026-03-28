@@ -94,6 +94,7 @@ Task-type gate:
 1. also read `docs/codex/TASK-TYPES.md`
 2. if the active task does not declare a task type, treat it as not dispatched
 3. do not infer `ENGINEERING` from a discussion-only chat thread
+4. treat `COD-*.md` task sheets as historical records unless `CURRENT.md` explicitly routes you to one
 
 ## 5. Collaboration model
 

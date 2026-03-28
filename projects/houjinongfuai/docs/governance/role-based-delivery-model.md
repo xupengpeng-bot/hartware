@@ -18,7 +18,7 @@ Read first:
 
 1. `D:\20251211\zhinengti\houjinongfuai\docs\README.md`
 2. `D:\20251211\zhinengti\houjinongfuai\docs\requirements\README.md`
-3. `D:\20251211\zhinengti\houjinongfuai\docs\系统说明\README.md`
+3. the business system-docs README under `D:\20251211\zhinengti\houjinongfuai\docs`
 4. `D:\20251211\zhinengti\houjinongfuai\docs\uat\README.md`
 5. execution history in active task sheets and `RESULT.md`
 
@@ -39,9 +39,9 @@ Default task type:
 Read first:
 
 1. `D:\20251211\zhinengti\houjinongfuai\docs\README.md`
-2. `D:\20251211\zhinengti\houjinongfuai\docs\系统说明\系统业务总览简版.md`
-3. `D:\20251211\zhinengti\houjinongfuai\docs\系统说明\系统整体业务需求.md`
-4. `.\PROJECT-MARKETING-BRIEF.md`
+2. `D:\20251211\zhinengti\houjinongfuai\docs\requirements\README.md`
+3. the business system-docs README under `D:\20251211\zhinengti\houjinongfuai\docs`
+4. `D:\20251211\zhinengti\development-system\projects\houjinongfuai\PROJECT-MARKETING-BRIEF.md`
 5. `docs/governance/marketing-strategy-standard.md`
 
 Default task types:

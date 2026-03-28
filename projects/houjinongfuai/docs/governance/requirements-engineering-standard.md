@@ -16,10 +16,10 @@ It must first pass through requirement analysis and requirement documentation.
 
 Typical examples:
 
-- "这个功能大概这样做"
-- "我想把这里做得更智能一点"
-- "后面可能要支持这个方向"
-- "我看执行历史感觉这里要调整"
+- "this feature should roughly work like this"
+- "I want this part to feel smarter"
+- "we may need to support this direction later"
+- "the execution history suggests this area needs adjustment"
 
 These are valid inputs.
 They are not yet executable task truth.
