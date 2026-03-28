@@ -25,6 +25,8 @@ Live software-engineer work is dispatched through this development-system worksp
 - `docs/codex/CLOUD-DEVELOPMENT-WORKFLOW.md`
 - `docs/governance/file-only-command-protocol.md`
 - `docs/governance/delivery-workflow.md`
+- `docs/governance/uat-execution-standard.md`
+- `docs/governance/uat-problem-solving-map.md`
 - `D:\20251211\zhinengti\development-system\shared\global-rules\encoding-governance.md`
 - `D:\20251211\zhinengti\development-system\shared\global-rules\development-system-evolution-rule.md`
 - `D:\20251211\zhinengti\development-system\shared\global-rules\project-config-standard.md`

@@ -51,9 +51,11 @@ Read these files first and use them as the only source of truth:
 14. `.\docs\governance\requirements-to-tasks-rule.md`
 15. `.\docs\governance\definition-of-ready.md`
 16. `.\docs\governance\delivery-workflow.md`
-17. `.\docs\governance\current-wave-2026-03-24.md`
-18. the active task file linked from `CURRENT.md`
-19. `.\docs\codex\RESULT.md`
+17. `.\docs\governance\uat-execution-standard.md`
+18. `.\docs\governance\uat-problem-solving-map.md`
+19. `.\docs\governance\current-wave-2026-03-24.md`
+20. the active task file linked from `CURRENT.md`
+21. `.\docs\codex\RESULT.md`
 
 You are the local software engineer for this project.
 

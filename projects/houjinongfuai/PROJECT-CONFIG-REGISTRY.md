@@ -152,6 +152,34 @@ This is optional and disabled by default.
 - dev:
   - `npm run dev`
 
+## UAT and simulation entry points
+
+### Human-facing UAT truth
+
+- `D:\20251211\zhinengti\houjinongfuai\docs\uat\README.md`
+- `D:\20251211\zhinengti\houjinongfuai\docs\uat\uat-plan-v1.md`
+- `D:\20251211\zhinengti\houjinongfuai\docs\uat\frontend-backend-contract-checklist-v1.md`
+- `D:\20251211\zhinengti\houjinongfuai\docs\uat\lovable-codex-sync.md`
+
+### Backend UAT support
+
+- `npm run test:e2e`
+- `npm run testdata:cleanup`
+- backend integration tests in:
+  - `D:\20251211\zhinengti\houjinongfuai\backend\test\integration`
+- backend e2e tests in:
+  - `D:\20251211\zhinengti\houjinongfuai\backend\test\e2e`
+
+### Frontend browser acceptance support
+
+- `D:\20251211\zhinengti\lovable\playwright.config.ts`
+- `D:\20251211\zhinengti\lovable\playwright-fixture.ts`
+
+### Device and protocol-side handoff support
+
+- `D:\20251211\zhinengti\houjinongfuai\embeddedcomhis`
+- `D:\20251211\zhinengti\houjinongfuai\hardwarecomhis`
+
 ## Tooling dependencies
 
 Expected commonly available tools:

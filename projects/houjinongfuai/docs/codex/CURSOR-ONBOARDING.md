@@ -69,9 +69,11 @@ Always read in this order:
 13. `docs/governance/requirements-to-tasks-rule.md`
 14. `docs/governance/definition-of-ready.md`
 15. `docs/governance/delivery-workflow.md`
-16. `docs/governance/current-wave-2026-03-24.md`
-17. the active task file linked from `CURRENT.md`
-18. `docs/codex/RESULT.md`
+16. `docs/governance/uat-execution-standard.md`
+17. `docs/governance/uat-problem-solving-map.md`
+18. `docs/governance/current-wave-2026-03-24.md`
+19. the active task file linked from `CURRENT.md`
+20. `docs/codex/RESULT.md`
 
 If the task touches frontend coordination, also read:
 

@@ -18,3 +18,5 @@ Use this folder for:
 - requirement-to-task decomposition rules
 - definition-of-ready
 - project-specific preflight and execution helpers
+- UAT execution standards
+- UAT troubleshooting and simulation maps
