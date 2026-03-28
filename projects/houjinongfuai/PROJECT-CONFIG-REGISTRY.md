@@ -192,6 +192,20 @@ Expected commonly available tools:
 - `arm-none-eabi-gcc`
 - `openocd`
 
+## New-environment tool-path confirmation
+
+For a new machine or new bench environment, embedded and hardware work must confirm the real executable paths with PM/user before continuing.
+
+Minimum confirmation set:
+
+- `arm-none-eabi-gcc`
+- `openocd`
+- `st-flash` or `STM32_Programmer_CLI`
+- `stm32flash` when serial flashing is needed
+- serial-terminal tool path when UART observation is part of the task
+
+Do not assume the previous machine's path layout still applies.
+
 Windows-specific guards:
 
 - system long paths enabled

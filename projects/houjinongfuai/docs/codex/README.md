@@ -22,6 +22,7 @@ Live software-engineer work is dispatched through this development-system worksp
 - `docs/codex/CURRENT.md`
 - `docs/codex/RESULT.md`
 - `docs/codex/TASK-DISPATCH-TEMPLATE.md`
+- `docs/codex/ROLE-INIT-README.md`
 - `docs/codex/WORK-MODES.md`
 - `docs/codex/TASK-TYPES.md`
 - `docs/codex/CLOUD-DEVELOPMENT-WORKFLOW.md`
@@ -58,5 +59,10 @@ Business sync note still lives with the codebase:
 - `COD-*.md` files in this folder are historical task sheets.
 - Do not read historical task sheets unless `CURRENT.md` or PM explicitly points to one.
 - Use the template files when creating new tasks or reusable evidence instead of copying historical task sheets.
+
+## Role-init rule
+
+- Use `ROLE-INIT-README.md` and the `role-init/*` cards when opening a fresh AI thread for a specific role.
+- Role-init cards do not replace `CURRENT.md`; they explain how each role should obtain work and where to stop.
 
 When PM or the user says only "execute", software engineer must read this folder's `CURRENT.md` first.

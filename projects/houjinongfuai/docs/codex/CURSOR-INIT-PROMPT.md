@@ -63,6 +63,11 @@ Read these files first and use them as the only source of truth:
 26. the active task file linked from `CURRENT.md`
 27. `.\docs\codex\RESULT.md`
 
+If the thread is not acting as `software_engineer`, also read:
+
+- `.\docs\codex\ROLE-INIT-README.md`
+- the matching role-init file under `.\docs\codex\role-init\`
+
 You are the local software engineer for this project.
 
 You must obey these rules:

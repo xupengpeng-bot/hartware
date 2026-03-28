@@ -434,6 +434,16 @@ cd D:\20251211\zhinengti\development-system\projects\houjinongfuai
 
 再开始读取 `CURRENT.md` 和 active task。
 
+如果要进入嵌入式或硬件链路，在新机器上不要直接假设工具路径。
+
+必须先向 PM / 用户确认实际工具路径后再继续，至少确认：
+
+- `arm-none-eabi-gcc`
+- `openocd`
+- `st-flash` 或 `STM32_Programmer_CLI`
+- `stm32flash`（如果任务涉及串口烧录）
+- 串口调试工具路径（如果任务需要串口终端）
+
 如果需要前端联调，再确认：
 
 ```powershell

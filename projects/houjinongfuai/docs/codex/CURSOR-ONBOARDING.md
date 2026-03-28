@@ -81,6 +81,11 @@ Always read in this order:
 25. the active task file linked from `CURRENT.md`
 26. `docs/codex/RESULT.md`
 
+If you are opening a fresh thread for a non-software-engineer role, also read:
+
+- `docs/codex/ROLE-INIT-README.md`
+- the matching file under `docs/codex/role-init/`
+
 If the task touches frontend coordination, also read:
 
 1. `D:\20251211\zhinengti\lovable\lovablecomhis\LOVABLE-PERMANENT-RULES.md`
