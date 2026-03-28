@@ -20,6 +20,7 @@ Use this folder for:
 - requirement-change impact standard
 - requirement-change template
 - role-based delivery model
+- end-to-end delivery model
 - marketing strategy standard
 - marketing-material template
 - definition-of-ready

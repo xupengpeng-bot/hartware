@@ -24,6 +24,7 @@ Bootstrap entry:
 
 ## Available role-init cards
 
+- `role-init/delivery_orchestrator.md`
 - `role-init/requirements_engineer.md`
 - `role-init/feature_research_engineer.md`
 - `role-init/software_engineer.md`

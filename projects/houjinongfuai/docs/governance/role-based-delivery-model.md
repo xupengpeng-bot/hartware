@@ -12,6 +12,16 @@ Role clarity reduces context drift.
 
 ## Role routing for this project
 
+### `delivery_orchestrator`
+
+Read first:
+
+1. `docs/codex/START-HERE.md`
+2. `<BUSINESS_REPO_ROOT>\docs\README.md`
+3. `<BUSINESS_REPO_ROOT>\docs\requirements\README.md`
+4. `docs/governance/end-to-end-delivery-model.md`
+5. `docs/governance/definition-of-ready.md`
+
 ### `requirements_engineer`
 
 Read first:
@@ -120,3 +130,13 @@ Every executable task should include:
 4. `mode` when relevant
 
 This gives different AI agents a consistent perspective even if they were not part of the earlier conversation.
+
+## Recommended single-PM future mode
+
+If PM wants to start with fuzzy demand and let the system carry the rest:
+
+1. `delivery_orchestrator` receives the fuzzy demand
+2. `requirements_engineer` sharpens it when needed
+3. execution roles handle only ready slices
+4. `uat_engineer` verifies and closes the acceptance layer
+5. `development_system_engineer` receives only separately-tracked workflow improvements

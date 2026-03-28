@@ -13,6 +13,24 @@ Role lane explains who should read it, execute it, or decompose it.
 
 ## Standard role lanes
 
+### `delivery_orchestrator`
+
+Focus:
+
+- receive fuzzy demand at the top level
+- decide the first owning role
+- keep the end-to-end chain moving
+- split work into requirement, engineering, UAT, and closure stages
+- reduce context switching by handing each role only the slice it needs
+
+Default output:
+
+- delivery route
+- task split recommendation
+- handoff list
+- stage status summary
+- escalation questions only when a hard gate blocks progress
+
 ### `requirements_engineer`
 
 Focus:
@@ -133,6 +151,7 @@ Focus:
 
 ## Role rule
 
+- If the request starts as a broad fuzzy business goal and should eventually become delivered work, route it through `delivery_orchestrator` first.
 - If a task is fuzzy and not yet executable, route it first to `requirements_engineer` or `feature_research_engineer`, not directly to `software_engineer`.
 - If a task is about business messaging, promotion, selling points, or audience-specific materials, route it to `marketing_strategy_engineer`.
 - If a task is about acceptance quality, closure, or execution evidence, route it to `uat_engineer`.
