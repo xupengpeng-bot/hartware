@@ -60,10 +60,12 @@ Always read in this order:
 4. `docs/codex/WORK-MODES.md`
 5. `docs/codex/TASK-TYPES.md`
 6. `docs/governance/file-only-command-protocol.md`
-7. `docs/governance/delivery-workflow.md`
-8. `docs/governance/current-wave-2026-03-24.md`
-9. the active task file linked from `CURRENT.md`
-10. `docs/codex/RESULT.md`
+7. `docs/governance/requirements-to-tasks-rule.md`
+8. `docs/governance/definition-of-ready.md`
+9. `docs/governance/delivery-workflow.md`
+10. `docs/governance/current-wave-2026-03-24.md`
+11. the active task file linked from `CURRENT.md`
+12. `docs/codex/RESULT.md`
 
 If the task touches frontend coordination, also read:
 

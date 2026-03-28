@@ -133,11 +133,14 @@ git rev-parse origin/main
 2. `docs/codex/README.md`
 3. `docs/codex/CURRENT.md`
 4. `docs/codex/WORK-MODES.md`
-5. `docs/governance/file-only-command-protocol.md`
-6. `docs/governance/delivery-workflow.md`
-7. `docs/governance/current-wave-2026-03-24.md`
-8. `CURRENT.md` 指向的 active task
-9. `docs/codex/RESULT.md`
+5. `docs/codex/TASK-TYPES.md`
+6. `docs/governance/file-only-command-protocol.md`
+7. `docs/governance/requirements-to-tasks-rule.md`
+8. `docs/governance/definition-of-ready.md`
+9. `docs/governance/delivery-workflow.md`
+10. `docs/governance/current-wave-2026-03-24.md`
+11. `CURRENT.md` 指向的 active task
+12. `docs/codex/RESULT.md`
 
 ### 5.3 第三步：判断当前任务是否允许执行
 
@@ -309,7 +312,10 @@ next handoff target:
    - docs/codex/README.md
    - docs/codex/CURRENT.md
    - docs/codex/WORK-MODES.md
+   - docs/codex/TASK-TYPES.md
    - docs/governance/file-only-command-protocol.md
+   - docs/governance/requirements-to-tasks-rule.md
+   - docs/governance/definition-of-ready.md
    - docs/governance/delivery-workflow.md
    - docs/governance/current-wave-2026-03-24.md
    - CURRENT.md 指向的 active task

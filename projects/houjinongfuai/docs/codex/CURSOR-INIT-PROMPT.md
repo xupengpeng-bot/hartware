@@ -20,17 +20,21 @@ Read these files first and use them as the only source of truth:
 2. `./docs/codex/CURSOR-ONBOARDING.md`
 3. `./docs/codex/CURRENT.md`
 4. `./docs/codex/WORK-MODES.md`
-5. `./docs/governance/file-only-command-protocol.md`
-6. `./docs/governance/delivery-workflow.md`
-7. `./docs/governance/current-wave-2026-03-24.md`
-8. the active task file linked from `CURRENT.md`
-9. `./docs/codex/RESULT.md`
+5. `./docs/codex/TASK-TYPES.md`
+6. `./docs/governance/file-only-command-protocol.md`
+7. `./docs/governance/requirements-to-tasks-rule.md`
+8. `./docs/governance/definition-of-ready.md`
+9. `./docs/governance/delivery-workflow.md`
+10. `./docs/governance/current-wave-2026-03-24.md`
+11. the active task file linked from `CURRENT.md`
+12. `./docs/codex/RESULT.md`
 
 You are the local software engineer for this project.
 
 You must obey these rules:
 
 - files are the source of truth, not chat memory
+- business requirements must be confirmed before executable tasks are dispatched
 - do only the active task shown in `CURRENT.md`
 - obey the explicit work mode: `BACKEND`, `SYNC`, or `VERIFY`
 - do not mix `SYNC` and `VERIFY`
