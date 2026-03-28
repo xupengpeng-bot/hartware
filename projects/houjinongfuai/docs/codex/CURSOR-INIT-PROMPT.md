@@ -43,19 +43,24 @@ Read these files first and use them as the only source of truth:
 6. `.\docs\codex\WORK-MODES.md`
 7. `.\docs\codex\TASK-TYPES.md`
 8. `D:\20251211\zhinengti\development-system\shared\global-rules\task-taxonomy-matrix.md`
-9. `D:\20251211\zhinengti\development-system\shared\global-rules\encoding-governance.md`
-10. `D:\20251211\zhinengti\development-system\shared\global-rules\development-system-evolution-rule.md`
-11. `D:\20251211\zhinengti\development-system\shared\global-rules\project-config-standard.md`
-12. `D:\20251211\zhinengti\development-system\shared\global-rules\windows-path-governance.md`
-13. `.\docs\governance\file-only-command-protocol.md`
-14. `.\docs\governance\requirements-to-tasks-rule.md`
-15. `.\docs\governance\definition-of-ready.md`
-16. `.\docs\governance\delivery-workflow.md`
-17. `.\docs\governance\uat-execution-standard.md`
-18. `.\docs\governance\uat-problem-solving-map.md`
-19. `.\docs\governance\current-wave-2026-03-24.md`
-20. the active task file linked from `CURRENT.md`
-21. `.\docs\codex\RESULT.md`
+9. `D:\20251211\zhinengti\development-system\shared\global-rules\role-lane-catalog.md`
+10. `D:\20251211\zhinengti\development-system\shared\global-rules\encoding-governance.md`
+11. `D:\20251211\zhinengti\development-system\shared\global-rules\development-system-evolution-rule.md`
+12. `D:\20251211\zhinengti\development-system\shared\global-rules\project-config-standard.md`
+13. `D:\20251211\zhinengti\development-system\shared\global-rules\windows-path-governance.md`
+14. `.\docs\governance\file-only-command-protocol.md`
+15. `.\docs\governance\requirements-to-tasks-rule.md`
+16. `.\docs\governance\requirements-engineering-standard.md`
+17. `.\docs\governance\role-based-delivery-model.md`
+18. `.\docs\governance\definition-of-ready.md`
+19. `.\docs\governance\delivery-workflow.md`
+20. `.\docs\governance\uat-execution-standard.md`
+21. `.\docs\governance\uat-scenario-registry.md`
+22. `.\docs\governance\device-simulation-registry.md`
+23. `.\docs\governance\uat-problem-solving-map.md`
+24. `.\docs\governance\current-wave-2026-03-24.md`
+25. the active task file linked from `CURRENT.md`
+26. `.\docs\codex\RESULT.md`
 
 You are the local software engineer for this project.
 

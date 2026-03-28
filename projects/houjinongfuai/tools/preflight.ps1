@@ -77,10 +77,17 @@ $TaskTypesFile = Join-Path $ProjectRoot 'docs\codex\TASK-TYPES.md'
 $ProjectConfigRegistry = Join-Path $ProjectRoot 'PROJECT-CONFIG-REGISTRY.md'
 $ReadyFile = Join-Path $ProjectRoot 'docs\governance\definition-of-ready.md'
 $ReqRuleFile = Join-Path $ProjectRoot 'docs\governance\requirements-to-tasks-rule.md'
+$ReqEngineeringFile = Join-Path $ProjectRoot 'docs\governance\requirements-engineering-standard.md'
+$RoleBasedModelFile = Join-Path $ProjectRoot 'docs\governance\role-based-delivery-model.md'
+$UatExecutionFile = Join-Path $ProjectRoot 'docs\governance\uat-execution-standard.md'
+$UatProblemMapFile = Join-Path $ProjectRoot 'docs\governance\uat-problem-solving-map.md'
+$UatScenarioRegistryFile = Join-Path $ProjectRoot 'docs\governance\uat-scenario-registry.md'
+$DeviceSimulationRegistryFile = Join-Path $ProjectRoot 'docs\governance\device-simulation-registry.md'
 $BusinessAgents = Join-Path $BusinessRoot 'AGENTS.md'
 $BusinessDocsReadme = Join-Path $BusinessRoot 'docs\README.md'
 $BusinessRulesFile = Join-Path $BusinessRoot 'docs\README.md'
 $SharedTaxonomy = Join-Path $DevSystemRoot 'shared\global-rules\task-taxonomy-matrix.md'
+$SharedRoleCatalog = Join-Path $DevSystemRoot 'shared\global-rules\role-lane-catalog.md'
 $SharedEncoding = Join-Path $DevSystemRoot 'shared\global-rules\encoding-governance.md'
 $SharedEvolution = Join-Path $DevSystemRoot 'shared\global-rules\development-system-evolution-rule.md'
 $SharedProjectConfigStandard = Join-Path $DevSystemRoot 'shared\global-rules\project-config-standard.md'
@@ -102,10 +109,17 @@ Test-RequiredPath -Name 'task types file' -Path $TaskTypesFile
 Test-RequiredPath -Name 'project config registry' -Path $ProjectConfigRegistry
 Test-RequiredPath -Name 'definition of ready file' -Path $ReadyFile
 Test-RequiredPath -Name 'requirements-to-tasks file' -Path $ReqRuleFile
+Test-RequiredPath -Name 'requirements-engineering standard' -Path $ReqEngineeringFile
+Test-RequiredPath -Name 'role-based delivery model' -Path $RoleBasedModelFile
+Test-RequiredPath -Name 'UAT execution standard' -Path $UatExecutionFile
+Test-RequiredPath -Name 'UAT problem-solving map' -Path $UatProblemMapFile
+Test-RequiredPath -Name 'UAT scenario registry' -Path $UatScenarioRegistryFile
+Test-RequiredPath -Name 'device simulation registry' -Path $DeviceSimulationRegistryFile
 Test-RequiredPath -Name 'business AGENTS' -Path $BusinessAgents
 Test-RequiredPath -Name 'business docs README' -Path $BusinessDocsReadme
 Test-RequiredPath -Name 'business product rules' -Path $BusinessRulesFile
 Test-RequiredPath -Name 'shared taxonomy rule' -Path $SharedTaxonomy
+Test-RequiredPath -Name 'shared role catalog' -Path $SharedRoleCatalog
 Test-RequiredPath -Name 'shared encoding rule' -Path $SharedEncoding
 Test-RequiredPath -Name 'shared evolution rule' -Path $SharedEvolution
 Test-RequiredPath -Name 'shared project-config standard' -Path $SharedProjectConfigStandard

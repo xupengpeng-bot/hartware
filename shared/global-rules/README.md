@@ -8,6 +8,7 @@ Purpose: hold shared development-system rules that are not business-specific.
 
 - `task-categories.md`
 - `task-taxonomy-matrix.md`
+- `role-lane-catalog.md`
 - `encoding-governance.md`
 - `development-system-evolution-rule.md`
 - `project-config-standard.md`

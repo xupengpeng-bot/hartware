@@ -61,19 +61,24 @@ Always read in this order:
 5. `docs/codex/WORK-MODES.md`
 6. `docs/codex/TASK-TYPES.md`
 7. `D:\20251211\zhinengti\development-system\shared\global-rules\task-taxonomy-matrix.md`
-8. `D:\20251211\zhinengti\development-system\shared\global-rules\encoding-governance.md`
-9. `D:\20251211\zhinengti\development-system\shared\global-rules\development-system-evolution-rule.md`
-10. `D:\20251211\zhinengti\development-system\shared\global-rules\project-config-standard.md`
-11. `D:\20251211\zhinengti\development-system\shared\global-rules\windows-path-governance.md`
-12. `docs/governance/file-only-command-protocol.md`
-13. `docs/governance/requirements-to-tasks-rule.md`
-14. `docs/governance/definition-of-ready.md`
-15. `docs/governance/delivery-workflow.md`
-16. `docs/governance/uat-execution-standard.md`
-17. `docs/governance/uat-problem-solving-map.md`
-18. `docs/governance/current-wave-2026-03-24.md`
-19. the active task file linked from `CURRENT.md`
-20. `docs/codex/RESULT.md`
+8. `D:\20251211\zhinengti\development-system\shared\global-rules\role-lane-catalog.md`
+9. `D:\20251211\zhinengti\development-system\shared\global-rules\encoding-governance.md`
+10. `D:\20251211\zhinengti\development-system\shared\global-rules\development-system-evolution-rule.md`
+11. `D:\20251211\zhinengti\development-system\shared\global-rules\project-config-standard.md`
+12. `D:\20251211\zhinengti\development-system\shared\global-rules\windows-path-governance.md`
+13. `docs/governance/file-only-command-protocol.md`
+14. `docs/governance/requirements-to-tasks-rule.md`
+15. `docs/governance/requirements-engineering-standard.md`
+16. `docs/governance/role-based-delivery-model.md`
+17. `docs/governance/definition-of-ready.md`
+18. `docs/governance/delivery-workflow.md`
+19. `docs/governance/uat-execution-standard.md`
+20. `docs/governance/uat-scenario-registry.md`
+21. `docs/governance/device-simulation-registry.md`
+22. `docs/governance/uat-problem-solving-map.md`
+23. `docs/governance/current-wave-2026-03-24.md`
+24. the active task file linked from `CURRENT.md`
+25. `docs/codex/RESULT.md`
 
 If the task touches frontend coordination, also read:
 

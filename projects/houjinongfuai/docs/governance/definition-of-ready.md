@@ -34,11 +34,18 @@ Before creating an executable task, PM should confirm all of the following:
      - `BACKEND`
      - `SYNC`
      - `VERIFY`
-6. allowed working area is explicit
+6. owner role is explicit
+   - for example:
+     - `requirements_engineer`
+     - `feature_research_engineer`
+     - `software_engineer`
+     - `frontend_engineer`
+     - `uat_engineer`
+7. allowed working area is explicit
    - which repo or directory may be touched
-7. verification basis is explicit
+8. verification basis is explicit
    - build, unit test, e2e, local acceptance, sync confirmation, or docs-only review
-8. handoff target is explicit
+9. handoff target is explicit
    - who receives the result next
 
 If any of these are still ambiguous, the task is not ready for executable dispatch.
@@ -51,12 +58,13 @@ Every executable task should provide at least:
 2. `requirement source`
 3. `task type`
 4. `task category`
-5. `mode`
-6. `status`
-7. `allowed working area`
-8. `execute now`
-9. `verification`
-10. `next handoff target`
+5. `owner role`
+6. `mode`
+7. `status`
+8. `allowed working area`
+9. `execute now`
+10. `verification`
+11. `next handoff target`
 
 ## Examples
 

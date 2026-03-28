@@ -16,6 +16,8 @@ Use this folder for:
 - task-system design
 - development-process rules
 - requirement-to-task decomposition rules
+- requirements-engineering standard
+- role-based delivery model
 - definition-of-ready
 - project-specific preflight and execution helpers
 - UAT execution standards
