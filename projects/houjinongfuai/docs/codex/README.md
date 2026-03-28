@@ -27,6 +27,7 @@ Live software-engineer work is dispatched through this development-system worksp
 - `docs/governance/file-only-command-protocol.md`
 - `docs/governance/delivery-workflow.md`
 - `docs/governance/requirements-engineering-standard.md`
+- `docs/governance/requirement-change-impact-standard.md`
 - `docs/governance/role-based-delivery-model.md`
 - `docs/governance/uat-execution-standard.md`
 - `docs/governance/uat-scenario-registry.md`

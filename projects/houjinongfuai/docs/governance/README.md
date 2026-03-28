@@ -17,6 +17,7 @@ Use this folder for:
 - development-process rules
 - requirement-to-task decomposition rules
 - requirements-engineering standard
+- requirement-change impact standard
 - role-based delivery model
 - definition-of-ready
 - project-specific preflight and execution helpers

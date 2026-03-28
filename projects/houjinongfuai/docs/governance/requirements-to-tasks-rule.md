@@ -51,11 +51,12 @@ The correct order is:
 
 1. capture fuzzy product intent if the demand is still rough
 2. confirm or update business requirements in the business repository
-3. freeze the requirement scope
-4. decompose the confirmed scope into typed AI tasks in the development-system workspace
-5. execute
-6. verify
-7. if needed, write requirement-level updates back into the business repository
+3. if the requirement was changed, mark the global impact surface explicitly
+4. freeze the requirement scope
+5. decompose the confirmed scope into typed AI tasks in the development-system workspace
+6. execute
+7. verify
+8. if needed, write requirement-level updates back into the business repository
 
 ## Hard gate
 

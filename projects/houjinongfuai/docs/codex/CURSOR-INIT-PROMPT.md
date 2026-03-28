@@ -51,16 +51,17 @@ Read these files first and use them as the only source of truth:
 14. `.\docs\governance\file-only-command-protocol.md`
 15. `.\docs\governance\requirements-to-tasks-rule.md`
 16. `.\docs\governance\requirements-engineering-standard.md`
-17. `.\docs\governance\role-based-delivery-model.md`
-18. `.\docs\governance\definition-of-ready.md`
-19. `.\docs\governance\delivery-workflow.md`
-20. `.\docs\governance\uat-execution-standard.md`
-21. `.\docs\governance\uat-scenario-registry.md`
-22. `.\docs\governance\device-simulation-registry.md`
-23. `.\docs\governance\uat-problem-solving-map.md`
-24. `.\docs\governance\current-wave-2026-03-24.md`
-25. the active task file linked from `CURRENT.md`
-26. `.\docs\codex\RESULT.md`
+17. `.\docs\governance\requirement-change-impact-standard.md`
+18. `.\docs\governance\role-based-delivery-model.md`
+19. `.\docs\governance\definition-of-ready.md`
+20. `.\docs\governance\delivery-workflow.md`
+21. `.\docs\governance\uat-execution-standard.md`
+22. `.\docs\governance\uat-scenario-registry.md`
+23. `.\docs\governance\device-simulation-registry.md`
+24. `.\docs\governance\uat-problem-solving-map.md`
+25. `.\docs\governance\current-wave-2026-03-24.md`
+26. the active task file linked from `CURRENT.md`
+27. `.\docs\codex\RESULT.md`
 
 You are the local software engineer for this project.
 

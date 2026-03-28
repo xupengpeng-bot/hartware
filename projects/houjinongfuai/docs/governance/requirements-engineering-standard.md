@@ -34,8 +34,9 @@ They are not yet executable task truth.
    - execution history
    - UAT findings
 4. requirements engineer updates or creates requirement truth in the business repository
-5. PM freezes the requirement scope enough for delivery
-6. executable tasks are decomposed afterwards
+5. if this is a requirement change, mark the global impact surface explicitly
+6. PM freezes the requirement scope enough for delivery
+7. executable tasks are decomposed afterwards
 
 ## Inputs for requirement analysis
 
@@ -47,6 +48,8 @@ Requirements analysis should use all relevant sources:
 4. recent verification failures
 5. product-rule changes from PM
 
+If the work is a requirement change, also analyze likely global impact points before task split.
+
 ## Outputs expected from requirements engineering
 
 At minimum:
@@ -54,9 +57,10 @@ At minimum:
 1. clarified business goal
 2. in-scope and out-of-scope
 3. object and field impact
-4. acceptance expectations
-5. open questions
-6. recommended split into later execution tasks
+4. global impact points
+5. acceptance expectations
+6. open questions
+7. recommended split into later execution tasks
 
 ## Hard rule
 
@@ -72,5 +76,7 @@ Requirements engineering may end with:
 
 - requirement update only
 - requirement update plus later task split recommendation
+
+If the requirement was changed rather than newly added, the output should also include impact markers for downstream executors.
 
 It does not automatically mean code should change in the same round.

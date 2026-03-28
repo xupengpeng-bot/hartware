@@ -18,6 +18,7 @@ Before creating an executable task, PM should confirm all of the following:
    - a business-facing requirement document exists in the business repository
 2. scope is frozen enough for execution
    - what is in scope and out of scope is clear enough to implement or verify
+   - if this is a requirement change, global impact points are explicitly marked
 3. intent is explicit
    - the work is clearly one of:
      - `INTEREST`
@@ -65,6 +66,7 @@ Every executable task should provide at least:
 9. `execute now`
 10. `verification`
 11. `next handoff target`
+12. `global impact points` when the task is derived from a requirement change
 
 ## Examples
 

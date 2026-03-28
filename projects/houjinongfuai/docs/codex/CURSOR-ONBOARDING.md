@@ -69,16 +69,17 @@ Always read in this order:
 13. `docs/governance/file-only-command-protocol.md`
 14. `docs/governance/requirements-to-tasks-rule.md`
 15. `docs/governance/requirements-engineering-standard.md`
-16. `docs/governance/role-based-delivery-model.md`
-17. `docs/governance/definition-of-ready.md`
-18. `docs/governance/delivery-workflow.md`
-19. `docs/governance/uat-execution-standard.md`
-20. `docs/governance/uat-scenario-registry.md`
-21. `docs/governance/device-simulation-registry.md`
-22. `docs/governance/uat-problem-solving-map.md`
-23. `docs/governance/current-wave-2026-03-24.md`
-24. the active task file linked from `CURRENT.md`
-25. `docs/codex/RESULT.md`
+16. `docs/governance/requirement-change-impact-standard.md`
+17. `docs/governance/role-based-delivery-model.md`
+18. `docs/governance/definition-of-ready.md`
+19. `docs/governance/delivery-workflow.md`
+20. `docs/governance/uat-execution-standard.md`
+21. `docs/governance/uat-scenario-registry.md`
+22. `docs/governance/device-simulation-registry.md`
+23. `docs/governance/uat-problem-solving-map.md`
+24. `docs/governance/current-wave-2026-03-24.md`
+25. the active task file linked from `CURRENT.md`
+26. `docs/codex/RESULT.md`
 
 If the task touches frontend coordination, also read:
 
