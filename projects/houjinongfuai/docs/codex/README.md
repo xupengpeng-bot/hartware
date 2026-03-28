@@ -18,6 +18,7 @@ Purpose: describe the live software-engineer execution entry and fixed work mode
 Live software-engineer work is dispatched through this development-system workspace:
 
 - `PROJECT-CONFIG-REGISTRY.md`
+- `PROJECT-MARKETING-BRIEF.md`
 - `docs/codex/CURRENT.md`
 - `docs/codex/RESULT.md`
 - `docs/codex/WORK-MODES.md`
@@ -29,6 +30,7 @@ Live software-engineer work is dispatched through this development-system worksp
 - `docs/governance/requirements-engineering-standard.md`
 - `docs/governance/requirement-change-impact-standard.md`
 - `docs/governance/role-based-delivery-model.md`
+- `docs/governance/marketing-strategy-standard.md`
 - `docs/governance/uat-execution-standard.md`
 - `docs/governance/uat-scenario-registry.md`
 - `docs/governance/device-simulation-registry.md`

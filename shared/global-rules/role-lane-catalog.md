@@ -45,6 +45,22 @@ Default output:
 - recommendation
 - risks and unknowns
 
+### `marketing_strategy_engineer`
+
+Focus:
+
+- read the project's overall situation
+- extract core advantages and differentiators
+- tailor messaging for different audiences
+- turn fuzzy marketing intent into structured campaign or content options
+
+Default output:
+
+- marketing angle options
+- audience-specific message points
+- material structure
+- proof points and objections
+
 ### `software_engineer`
 
 Focus:
@@ -118,6 +134,7 @@ Focus:
 ## Role rule
 
 - If a task is fuzzy and not yet executable, route it first to `requirements_engineer` or `feature_research_engineer`, not directly to `software_engineer`.
+- If a task is about business messaging, promotion, selling points, or audience-specific materials, route it to `marketing_strategy_engineer`.
 - If a task is about acceptance quality, closure, or execution evidence, route it to `uat_engineer`.
 - If a task changes workflow or the task system itself, route it to `development_system_engineer`.
 

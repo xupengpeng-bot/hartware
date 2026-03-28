@@ -19,6 +19,7 @@ Use this folder for:
 - requirements-engineering standard
 - requirement-change impact standard
 - role-based delivery model
+- marketing strategy standard
 - definition-of-ready
 - project-specific preflight and execution helpers
 - UAT execution standards

@@ -34,6 +34,21 @@ Default task type:
 
 - `INTEREST`
 
+### `marketing_strategy_engineer`
+
+Read first:
+
+1. `D:\20251211\zhinengti\houjinongfuai\docs\README.md`
+2. `D:\20251211\zhinengti\houjinongfuai\docs\系统说明\系统业务总览简版.md`
+3. `D:\20251211\zhinengti\houjinongfuai\docs\系统说明\系统整体业务需求.md`
+4. `.\PROJECT-MARKETING-BRIEF.md`
+5. `docs/governance/marketing-strategy-standard.md`
+
+Default task types:
+
+- `INTEREST`
+- `LANGUAGE`
+
 ### `software_engineer`
 
 Read first:
