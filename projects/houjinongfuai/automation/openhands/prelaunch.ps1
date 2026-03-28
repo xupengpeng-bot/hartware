@@ -1,13 +1,14 @@
 param(
     [switch]$RequireActiveTask,
-    [string]$BusinessRoot = $(Join-Path (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)))) 'houjinongfuai'),
-    [string]$FrontendRoot = $(Join-Path (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)))) 'lovable')
+    [string]$BusinessRoot = $(Join-Path (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))))) 'houjinongfuai'),
+    [string]$FrontendRoot = $(Join-Path (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))))) 'lovable')
 )
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
+$ProjectRoot = Split-Path -Parent $ProjectRoot
 $CurrentFile = Join-Path $ProjectRoot 'docs\codex\CURRENT.md'
-$LaunchProfile = Join-Path $ProjectRoot 'docs\codex\OPENHANDS-LAUNCH-PROFILE.md'
-$PromptFile = Join-Path $ProjectRoot 'docs\codex\OPENHANDS-SOFTWARE-ENGINEER-PROMPT.md'
+$LaunchProfile = Join-Path $ProjectRoot 'automation\openhands\launch-profile.md'
+$PromptFile = Join-Path $ProjectRoot 'automation\openhands\software-engineer-prompt.md'
 $ResultFile = Join-Path $ProjectRoot 'docs\codex\RESULT.md'
 $Checks = @()
 
@@ -91,7 +92,7 @@ if (Test-Path -LiteralPath $CurrentFile) {
     }
 }
 
-$preflightCommand = Join-Path $PSScriptRoot 'preflight.ps1'
+$preflightCommand = Join-Path $ProjectRoot 'tools\preflight.ps1'
 if (Test-Path -LiteralPath $preflightCommand) {
     & $preflightCommand -BusinessRoot $BusinessRoot -FrontendRoot $FrontendRoot | Out-Null
     if ($LASTEXITCODE -eq 0) {

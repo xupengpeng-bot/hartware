@@ -21,8 +21,6 @@ Start from these files only:
 - `WORK-MODES.md`
 - `TASK-DISPATCH-TEMPLATE.md`
 - `REMOTE-FIRST-BOOTSTRAP.md`
-- `OPENHANDS-LAUNCH-PROFILE.md`
-- `OPENHANDS-SOFTWARE-ENGINEER-PROMPT.md`
 - `ROLE-INIT-README.md`
 - `role-init/*`
 - `DOMAIN-NAVIGATION.md`
@@ -37,4 +35,8 @@ Start from these files only:
 
 - `tools/preflight.ps1`
 - `tools/bootstrap-from-remote.ps1`
-- `tools/openhands-prelaunch.ps1`
+
+## Automation packages
+
+- `automation/README.md`
+- `automation/openhands/README.md`

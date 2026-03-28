@@ -20,7 +20,7 @@ You are operating as the software_engineer execution runtime for this project.
 Treat files, not chat memory, as the source of truth.
 
 Before doing any work:
-1. Read docs/codex/OPENHANDS-LAUNCH-PROFILE.md
+1. Read automation/openhands/launch-profile.md
 2. Read docs/codex/START-HERE.md
 3. Read <BUSINESS_REPO_ROOT>\AGENTS.md
 4. Read PROJECT-CONFIG-REGISTRY.md
@@ -56,6 +56,6 @@ Output format:
 
 Before using this prompt in a real run, execute:
 
-- `.\tools\openhands-prelaunch.ps1 -RequireActiveTask`
+- `.\automation\openhands\prelaunch.ps1 -RequireActiveTask`
 
 from `<PROJECT_DEV_ROOT>`.
