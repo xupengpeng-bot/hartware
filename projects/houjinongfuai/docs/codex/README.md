@@ -21,6 +21,7 @@ Start from these files only:
 - `WORK-MODES.md`
 - `TASK-DISPATCH-TEMPLATE.md`
 - `REMOTE-FIRST-BOOTSTRAP.md`
+- `OPENHANDS-LAUNCH-PROFILE.md`
 - `ROLE-INIT-README.md`
 - `role-init/*`
 - `DOMAIN-NAVIGATION.md`

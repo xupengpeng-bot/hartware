@@ -21,6 +21,7 @@ Use this folder for:
 - requirement-change template
 - role-based delivery model
 - end-to-end delivery model
+- OpenHands adaptation plan
 - marketing strategy standard
 - marketing-material template
 - definition-of-ready
