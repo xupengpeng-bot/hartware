@@ -1,70 +1,37 @@
 # Codex Docs
 
 Status: active
-Audience: PM and software engineer
-Purpose: describe the live software-engineer execution entry and fixed work modes for the external development-system workspace.
+Audience: PM and AI agents
+Purpose: keep the live entry chain small and keep archived task records out of the active directory.
 
-## Workspace anchors
+## Small entry
 
-- development-system workspace:
-  - `D:\20251211\zhinengti\development-system\projects\houjinongfuai`
-- business-code workspace:
-  - `D:\20251211\zhinengti\houjinongfuai`
-- frontend workspace:
-  - `D:\20251211\zhinengti\lovable`
+Start from these files only:
 
-## Files
+1. `START-HERE.md`
+2. `CURRENT.md`
+3. `ROLE-INIT-README.md`
+4. `DOMAIN-NAVIGATION.md`
 
-Live software-engineer work is dispatched through this development-system workspace:
+## Active files
 
-- `PROJECT-CONFIG-REGISTRY.md`
-- `PROJECT-MARKETING-BRIEF.md`
-- `docs/codex/CURRENT.md`
-- `docs/codex/RESULT.md`
-- `docs/codex/TASK-DISPATCH-TEMPLATE.md`
-- `docs/codex/ROLE-INIT-README.md`
-- `docs/codex/REMOTE-FIRST-BOOTSTRAP.md`
-- `docs/codex/WORK-MODES.md`
-- `docs/codex/TASK-TYPES.md`
-- `docs/codex/CLOUD-DEVELOPMENT-WORKFLOW.md`
-- `D:\20251211\zhinengti\development-system\shared\global-rules\role-lane-catalog.md`
-- `docs/governance/file-only-command-protocol.md`
-- `docs/governance/delivery-workflow.md`
-- `docs/governance/requirements-engineering-standard.md`
-- `docs/governance/requirement-change-impact-standard.md`
-- `docs/governance/role-based-delivery-model.md`
-- `docs/governance/marketing-strategy-standard.md`
-- `docs/governance/REQUIREMENT-CHANGE-TEMPLATE.md`
-- `docs/governance/UAT-EVIDENCE-TEMPLATE.md`
-- `docs/governance/MARKETING-MATERIAL-TEMPLATE.md`
-- `docs/governance/uat-execution-standard.md`
-- `docs/governance/uat-scenario-registry.md`
-- `docs/governance/device-simulation-registry.md`
-- `docs/governance/uat-problem-solving-map.md`
-- `D:\20251211\zhinengti\development-system\shared\global-rules\encoding-governance.md`
-- `D:\20251211\zhinengti\development-system\shared\global-rules\development-system-evolution-rule.md`
-- `D:\20251211\zhinengti\development-system\shared\global-rules\project-config-standard.md`
-- `D:\20251211\zhinengti\development-system\shared\global-rules\windows-path-governance.md`
+- `CURRENT.md`
+- `RESULT.md`
+- `TASK-TYPES.md`
+- `WORK-MODES.md`
+- `TASK-DISPATCH-TEMPLATE.md`
+- `REMOTE-FIRST-BOOTSTRAP.md`
+- `ROLE-INIT-README.md`
+- `role-init/*`
+- `DOMAIN-NAVIGATION.md`
+- `START-HERE.md`
 
-Preflight helper:
+## Historical files
+
+- archived task sheets live under `docs/codex/history`
+- do not read archive files unless the live task chain explicitly points there
+
+## Helpers
 
 - `tools/preflight.ps1`
 - `tools/bootstrap-from-remote.ps1`
-
-Business sync note still lives with the codebase:
-
-- `D:\20251211\zhinengti\houjinongfuai\docs\uat\lovable-codex-sync.md`
-
-## Historical task rule
-
-- `CURRENT.md`, `RESULT.md`, and the shared/global rules are the active entry chain.
-- `COD-*.md` files in this folder are historical task sheets.
-- Do not read historical task sheets unless `CURRENT.md` or PM explicitly points to one.
-- Use the template files when creating new tasks or reusable evidence instead of copying historical task sheets.
-
-## Role-init rule
-
-- Use `ROLE-INIT-README.md` and the `role-init/*` cards when opening a fresh AI thread for a specific role.
-- Role-init cards do not replace `CURRENT.md`; they explain how each role should obtain work and where to stop.
-
-When PM or the user says only "execute", software engineer must read this folder's `CURRENT.md` first.

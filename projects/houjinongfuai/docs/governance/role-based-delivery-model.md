@@ -16,10 +16,10 @@ Role clarity reduces context drift.
 
 Read first:
 
-1. `D:\20251211\zhinengti\houjinongfuai\docs\README.md`
-2. `D:\20251211\zhinengti\houjinongfuai\docs\requirements\README.md`
-3. the business system-docs README under `D:\20251211\zhinengti\houjinongfuai\docs`
-4. `D:\20251211\zhinengti\houjinongfuai\docs\uat\README.md`
+1. `<BUSINESS_REPO_ROOT>\docs\README.md`
+2. `<BUSINESS_REPO_ROOT>\docs\requirements\README.md`
+3. the business system-docs README under `<BUSINESS_REPO_ROOT>\docs`
+4. `<BUSINESS_REPO_ROOT>\docs\uat\README.md`
 5. execution history in active task sheets and `RESULT.md`
 
 ### `feature_research_engineer`
@@ -38,10 +38,10 @@ Default task type:
 
 Read first:
 
-1. `D:\20251211\zhinengti\houjinongfuai\docs\README.md`
-2. `D:\20251211\zhinengti\houjinongfuai\docs\requirements\README.md`
-3. the business system-docs README under `D:\20251211\zhinengti\houjinongfuai\docs`
-4. `D:\20251211\zhinengti\development-system\projects\houjinongfuai\PROJECT-MARKETING-BRIEF.md`
+1. `<BUSINESS_REPO_ROOT>\docs\README.md`
+2. `<BUSINESS_REPO_ROOT>\docs\requirements\README.md`
+3. the business system-docs README under `<BUSINESS_REPO_ROOT>\docs`
+4. `<PROJECT_DEV_ROOT>\PROJECT-MARKETING-BRIEF.md`
 5. `docs/governance/marketing-strategy-standard.md`
 
 Default task types:
@@ -66,15 +66,15 @@ Default task type:
 Read first:
 
 1. frontend task package
-2. `D:\20251211\zhinengti\houjinongfuai\docs\uat\lovable-codex-sync.md`
+2. `<BUSINESS_REPO_ROOT>\docs\uat\lovable-codex-sync.md`
 3. contract checklist
 
 ### `uat_engineer`
 
 Read first:
 
-1. `D:\20251211\zhinengti\houjinongfuai\docs\uat\README.md`
-2. `D:\20251211\zhinengti\houjinongfuai\docs\uat\uat-plan-v1.md`
+1. `<BUSINESS_REPO_ROOT>\docs\uat\README.md`
+2. `<BUSINESS_REPO_ROOT>\docs\uat\uat-plan-v1.md`
 3. `docs/governance/uat-execution-standard.md`
 4. `docs/governance/uat-problem-solving-map.md`
 5. `PROJECT-CONFIG-REGISTRY.md`
@@ -87,15 +87,15 @@ Default task category:
 
 Read first:
 
-1. `D:\20251211\zhinengti\houjinongfuai\embeddedcomhis\CURRENT.md`
-2. `D:\20251211\zhinengti\houjinongfuai\embeddedcomhis\README.md`
+1. `<BUSINESS_REPO_ROOT>\embeddedcomhis\CURRENT.md`
+2. `<BUSINESS_REPO_ROOT>\embeddedcomhis\README.md`
 
 ### `hardware_engineer`
 
 Read first:
 
-1. `D:\20251211\zhinengti\houjinongfuai\hardwarecomhis\CURRENT.md`
-2. `D:\20251211\zhinengti\houjinongfuai\hardwarecomhis\README.md`
+1. `<BUSINESS_REPO_ROOT>\hardwarecomhis\CURRENT.md`
+2. `<BUSINESS_REPO_ROOT>\hardwarecomhis\README.md`
 
 ### `development_system_engineer`
 

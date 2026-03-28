@@ -14,16 +14,16 @@ They must stay physically and logically separate.
 
 Business requirement docs belong in the business repository:
 
-- `D:\20251211\zhinengti\houjinongfuai\docs\requirements`
-- the business system-docs tree linked from `D:\20251211\zhinengti\houjinongfuai\docs\README.md`
-- `D:\20251211\zhinengti\houjinongfuai\docs\p1`
-- `D:\20251211\zhinengti\houjinongfuai\docs\protocol`
-- `D:\20251211\zhinengti\houjinongfuai\docs\uat`
+- `<BUSINESS_REPO_ROOT>\docs\requirements`
+- the business system-docs tree linked from `<BUSINESS_REPO_ROOT>\docs\README.md`
+- `<BUSINESS_REPO_ROOT>\docs\p1`
+- `<BUSINESS_REPO_ROOT>\docs\protocol`
+- `<BUSINESS_REPO_ROOT>\docs\uat`
 
 AI task instructions belong in the development-system workspace:
 
-- `D:\20251211\zhinengti\development-system\projects\houjinongfuai\docs\codex`
-- `D:\20251211\zhinengti\development-system\projects\houjinongfuai\docs\governance`
+- `<PROJECT_DEV_ROOT>\docs\codex`
+- `<PROJECT_DEV_ROOT>\docs\governance`
 
 ## Intent split
 

@@ -51,41 +51,27 @@ You must obey these repository-level rules:
 5. AI must not directly control devices
 6. do not reopen frozen architecture unless PM explicitly reopens it
 
-## 4. Read order before any task
+## 4. Small read chain before any task
 
 Always read in this order:
 
-1. `D:\20251211\zhinengti\houjinongfuai\AGENTS.md`
-2. `<BUSINESS_REPO_ROOT>\docs\README.md`
+1. `docs/codex/START-HERE.md`
+2. `<BUSINESS_REPO_ROOT>\AGENTS.md`
 3. `PROJECT-CONFIG-REGISTRY.md`
 4. `docs/codex/CURRENT.md`
 5. `docs/codex/WORK-MODES.md`
 6. `docs/codex/TASK-TYPES.md`
-7. `<DEVSYSTEM_REPO_ROOT>\shared\global-rules\task-taxonomy-matrix.md`
-8. `<DEVSYSTEM_REPO_ROOT>\shared\global-rules\role-lane-catalog.md`
-9. `<DEVSYSTEM_REPO_ROOT>\shared\global-rules\encoding-governance.md`
-10. `<DEVSYSTEM_REPO_ROOT>\shared\global-rules\development-system-evolution-rule.md`
-11. `<DEVSYSTEM_REPO_ROOT>\shared\global-rules\project-config-standard.md`
-12. `<DEVSYSTEM_REPO_ROOT>\shared\global-rules\windows-path-governance.md`
-13. `docs/governance/file-only-command-protocol.md`
-14. `docs/governance/requirements-to-tasks-rule.md`
-15. `docs/governance/requirements-engineering-standard.md`
-16. `docs/governance/requirement-change-impact-standard.md`
-17. `docs/governance/role-based-delivery-model.md`
-18. `docs/governance/definition-of-ready.md`
-19. `docs/governance/delivery-workflow.md`
-20. `docs/governance/uat-execution-standard.md`
-21. `docs/governance/uat-scenario-registry.md`
-22. `docs/governance/device-simulation-registry.md`
-23. `docs/governance/uat-problem-solving-map.md`
-24. `docs/governance/current-wave-2026-03-24.md`
-25. the active task file linked from `CURRENT.md`
-26. `docs/codex/RESULT.md`
+7. the active task file linked from `CURRENT.md`
+8. `docs/codex/RESULT.md`
 
 If you are opening a fresh thread for a non-software-engineer role, also read:
 
 - `docs/codex/ROLE-INIT-README.md`
 - the matching file under `docs/codex/role-init/`
+
+If the domain is unclear, also read:
+
+- `docs/codex/DOMAIN-NAVIGATION.md`
 
 If the task touches frontend coordination, also read:
 
@@ -100,7 +86,7 @@ Task-type gate:
 1. also read `docs/codex/TASK-TYPES.md`
 2. if the active task does not declare a task type, treat it as not dispatched
 3. do not infer `ENGINEERING` from a discussion-only chat thread
-4. treat `COD-*.md` task sheets as historical records unless `CURRENT.md` explicitly routes you to one
+4. treat files under `docs/codex/history` as historical records unless `CURRENT.md` explicitly routes you to one
 
 ## 5. Collaboration model
 

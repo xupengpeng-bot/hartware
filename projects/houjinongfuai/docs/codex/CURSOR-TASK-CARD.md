@@ -39,7 +39,7 @@ Out of scope:
 1. Only execute the current task pointed to by CURRENT.md.
 2. Files are the source of truth. Do not guess from old chat context.
 3. If CURRENT.md does not contain active task / work mode / execute-now, treat the task as not dispatched and stop.
-4. Treat `COD-*.md` task sheets as historical records unless CURRENT.md explicitly points to them.
+4. Treat files under `docs/codex/history` as historical records unless CURRENT.md explicitly points to them.
 5. Follow the work mode strictly:
    - BACKEND: backend implementation, migrations, tests, contract stabilization
    - SYNC: sync only frontend handoff files into frontend Git main

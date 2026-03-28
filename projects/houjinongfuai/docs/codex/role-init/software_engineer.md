@@ -23,7 +23,7 @@ Primary goal: execute the active engineering task without drifting into requirem
 - Use `CURRENT.md` as the execution gate.
 - If `active task = none`, report `no active task` and stop.
 - If `task type = none`, report `task type missing` and stop.
-- Treat `COD-*.md` files as historical records unless `CURRENT.md` explicitly points to one.
+- Treat files under `docs/codex/history` as historical records unless `CURRENT.md` explicitly points to one.
 - Follow only the frozen mode: `BACKEND`, `SYNC`, or `VERIFY`.
 
 ## Default outputs

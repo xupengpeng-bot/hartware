@@ -19,20 +19,20 @@ Do not assume the same drive letter or parent path as another machine.
 ## Active repositories
 
 - backend business repository:
-  - `D:\20251211\zhinengti\houjinongfuai`
+  - `<BUSINESS_REPO_ROOT>`
 - frontend repository:
-  - `D:\20251211\zhinengti\lovable`
+  - `<FRONTEND_REPO_ROOT>`
 - development-system repository:
-  - `D:\20251211\zhinengti\development-system`
+  - `<DEVSYSTEM_REPO_ROOT>`
 
 ## Env files
 
 ### Backend
 
 - template:
-  - `D:\20251211\zhinengti\houjinongfuai\backend\.env.example`
+  - `<BUSINESS_REPO_ROOT>\backend\.env.example`
 - local file:
-  - `D:\20251211\zhinengti\houjinongfuai\backend\.env`
+  - `<BUSINESS_REPO_ROOT>\backend\.env`
 
 Primary key groups:
 
@@ -59,7 +59,7 @@ Primary key groups:
 ### Frontend
 
 - template:
-  - `D:\20251211\zhinengti\lovable\.env.example`
+  - `<FRONTEND_REPO_ROOT>\.env.example`
 - local file:
   - `<FRONTEND_REPO_ROOT>\.env`
 
@@ -134,7 +134,7 @@ The DB bootstrap should be treated as live task-state truth for:
 ### Backend startup
 
 - script:
-  - `D:\20251211\zhinengti\houjinongfuai\start-backend.ps1`
+  - `<BUSINESS_REPO_ROOT>\start-backend.ps1`
 - behavior:
   - creates backend `.env` from template if needed
   - installs dependencies if `node_modules` is missing
@@ -146,7 +146,7 @@ The DB bootstrap should be treated as live task-state truth for:
 ### Frontend startup
 
 - script:
-  - `D:\20251211\zhinengti\houjinongfuai\start-frontend.ps1`
+  - `<BUSINESS_REPO_ROOT>\start-frontend.ps1`
 - behavior:
   - resolves frontend repo as sibling `..\lovable` unless overridden
   - creates frontend `.env` from template if needed
@@ -158,12 +158,12 @@ The DB bootstrap should be treated as live task-state truth for:
 ### Development-system
 
 - preflight:
-  - `D:\20251211\zhinengti\development-system\projects\houjinongfuai\tools\preflight.ps1`
+  - `<PROJECT_DEV_ROOT>\tools\preflight.ps1`
 
 ### Backend
 
 - install:
-  - `cd D:\20251211\zhinengti\houjinongfuai\backend`
+  - `cd <BUSINESS_REPO_ROOT>\backend`
   - `npm install`
 - DB and migration:
   - `npm run db:up`
@@ -176,7 +176,7 @@ The DB bootstrap should be treated as live task-state truth for:
 ### Frontend
 
 - install:
-  - `cd D:\20251211\zhinengti\lovable`
+  - `cd <FRONTEND_REPO_ROOT>`
   - `npm install`
 - dev:
   - `npm run dev`
@@ -185,29 +185,29 @@ The DB bootstrap should be treated as live task-state truth for:
 
 ### Human-facing UAT truth
 
-- `D:\20251211\zhinengti\houjinongfuai\docs\uat\README.md`
-- `D:\20251211\zhinengti\houjinongfuai\docs\uat\uat-plan-v1.md`
-- `D:\20251211\zhinengti\houjinongfuai\docs\uat\frontend-backend-contract-checklist-v1.md`
-- `D:\20251211\zhinengti\houjinongfuai\docs\uat\lovable-codex-sync.md`
+- `<BUSINESS_REPO_ROOT>\docs\uat\README.md`
+- `<BUSINESS_REPO_ROOT>\docs\uat\uat-plan-v1.md`
+- `<BUSINESS_REPO_ROOT>\docs\uat\frontend-backend-contract-checklist-v1.md`
+- `<BUSINESS_REPO_ROOT>\docs\uat\lovable-codex-sync.md`
 
 ### Backend UAT support
 
 - `npm run test:e2e`
 - `npm run testdata:cleanup`
 - backend integration tests in:
-  - `D:\20251211\zhinengti\houjinongfuai\backend\test\integration`
+  - `<BUSINESS_REPO_ROOT>\backend\test\integration`
 - backend e2e tests in:
-  - `D:\20251211\zhinengti\houjinongfuai\backend\test\e2e`
+  - `<BUSINESS_REPO_ROOT>\backend\test\e2e`
 
 ### Frontend browser acceptance support
 
-- `D:\20251211\zhinengti\lovable\playwright.config.ts`
-- `D:\20251211\zhinengti\lovable\playwright-fixture.ts`
+- `<FRONTEND_REPO_ROOT>\playwright.config.ts`
+- `<FRONTEND_REPO_ROOT>\playwright-fixture.ts`
 
 ### Device and protocol-side handoff support
 
-- `D:\20251211\zhinengti\houjinongfuai\embeddedcomhis`
-- `D:\20251211\zhinengti\houjinongfuai\hardwarecomhis`
+- `<BUSINESS_REPO_ROOT>\embeddedcomhis`
+- `<BUSINESS_REPO_ROOT>\hardwarecomhis`
 
 ## Tooling dependencies
 

@@ -17,7 +17,7 @@ Use workspace-relative anchors on the current machine:
 ## Current state
 
 - completed tasks
-  - historical task records are kept in sibling task sheets in this folder
+  - historical task records are kept under `docs/codex/history`
 - active task
   - none
 - task type
@@ -27,34 +27,24 @@ Use workspace-relative anchors on the current machine:
 
 - IDLE
 
-## Read order
+## Small read chain
 
-1. `D:\20251211\zhinengti\houjinongfuai\AGENTS.md`
-2. `<BUSINESS_REPO_ROOT>\docs\README.md`
+1. `START-HERE.md`
+2. `<BUSINESS_REPO_ROOT>\AGENTS.md`
 3. `PROJECT-CONFIG-REGISTRY.md`
-4. `docs/codex/CURRENT.md`
-5. `docs/codex/WORK-MODES.md`
-6. `docs/codex/TASK-TYPES.md`
-7. `<DEVSYSTEM_REPO_ROOT>\shared\global-rules\task-taxonomy-matrix.md`
-8. `<DEVSYSTEM_REPO_ROOT>\shared\global-rules\role-lane-catalog.md`
-9. `<DEVSYSTEM_REPO_ROOT>\shared\global-rules\encoding-governance.md`
-10. `<DEVSYSTEM_REPO_ROOT>\shared\global-rules\development-system-evolution-rule.md`
-11. `<DEVSYSTEM_REPO_ROOT>\shared\global-rules\project-config-standard.md`
-12. `<DEVSYSTEM_REPO_ROOT>\shared\global-rules\windows-path-governance.md`
-13. `docs/governance/file-only-command-protocol.md`
-14. `docs/governance/requirements-to-tasks-rule.md`
-15. `docs/governance/requirements-engineering-standard.md`
-16. `docs/governance/requirement-change-impact-standard.md`
-17. `docs/governance/role-based-delivery-model.md`
-18. `docs/governance/definition-of-ready.md`
-19. `docs/governance/delivery-workflow.md`
-20. `docs/governance/uat-execution-standard.md`
-21. `docs/governance/uat-scenario-registry.md`
-22. `docs/governance/device-simulation-registry.md`
-23. `docs/governance/uat-problem-solving-map.md`
-24. `docs/governance/current-wave-2026-03-24.md`
-25. the active task file linked from `CURRENT.md`
-26. `docs/codex/RESULT.md`
+4. `WORK-MODES.md`
+5. `TASK-TYPES.md`
+6. the active task file linked from `CURRENT.md`
+7. `RESULT.md`
+
+If the thread is role-specific:
+
+- read `ROLE-INIT-README.md`
+- then read the matching `role-init/*` card
+
+If the domain is unclear:
+
+- read `DOMAIN-NAVIGATION.md`
 
 ## Allowed working area
 
@@ -71,12 +61,12 @@ Use workspace-relative anchors on the current machine:
 
 ## Execute now
 
-- On a brand-new machine, complete Git bootstrap first. See `docs/codex/REMOTE-FIRST-BOOTSTRAP.md`.
+- On a brand-new machine, complete Git bootstrap first. See `REMOTE-FIRST-BOOTSTRAP.md`.
 - When dispatch DB is active, read the lane/task bootstrap from DB before trusting cached local task files.
 - Wait for PM to set `active task`.
 - If `active task = none`, report `no active task` and stop.
 - If `task type = none`, report `task type missing` and stop.
-- Treat `COD-*.md` files in this folder as historical records unless `CURRENT.md` points to one.
+- Treat files under `docs/codex/history` as historical records unless `CURRENT.md` points to one.
 - Do not treat chat discussion, architecture discussion, governance discussion, or curiosity questions as executable work unless PM freezes them into the active task files.
 - If a task reveals a useful process or tooling improvement, report it as a development-system improvement candidate instead of silently expanding scope.
 
@@ -88,4 +78,4 @@ Use workspace-relative anchors on the current machine:
 
 ## Result writeback
 
-After each execution, update `docs/codex/RESULT.md` using the fixed format in the protocol file.
+After each execution, update `RESULT.md` using the fixed format in the protocol file.

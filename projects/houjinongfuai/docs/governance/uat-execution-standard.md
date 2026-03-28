@@ -28,10 +28,10 @@ Do not skip directly to browser conclusions when the backend layer is still red.
 
 Read from the business repository:
 
-- `D:\20251211\zhinengti\houjinongfuai\docs\uat\README.md`
-- `D:\20251211\zhinengti\houjinongfuai\docs\uat\uat-plan-v1.md`
-- `D:\20251211\zhinengti\houjinongfuai\docs\uat\frontend-backend-contract-checklist-v1.md`
-- `D:\20251211\zhinengti\houjinongfuai\docs\uat\lovable-codex-sync.md`
+- `<BUSINESS_REPO_ROOT>\docs\uat\README.md`
+- `<BUSINESS_REPO_ROOT>\docs\uat\uat-plan-v1.md`
+- `<BUSINESS_REPO_ROOT>\docs\uat\frontend-backend-contract-checklist-v1.md`
+- `<BUSINESS_REPO_ROOT>\docs\uat\lovable-codex-sync.md`
 
 ### AI-facing execution truth
 

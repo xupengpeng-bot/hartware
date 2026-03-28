@@ -39,8 +39,8 @@ Typical signals:
 
 Read first:
 
-1. `D:\20251211\zhinengti\houjinongfuai\docs\uat\frontend-backend-contract-checklist-v1.md`
-2. `D:\20251211\zhinengti\houjinongfuai\docs\uat\lovable-codex-sync.md`
+1. `<BUSINESS_REPO_ROOT>\docs\uat\frontend-backend-contract-checklist-v1.md`
+2. `<BUSINESS_REPO_ROOT>\docs\uat\lovable-codex-sync.md`
 3. relevant business requirement docs
 4. backend tests and response model code
 
@@ -57,7 +57,7 @@ Read first:
 
 1. frontend task package and fixtures
 2. frontend Playwright config and fixtures
-3. `D:\20251211\zhinengti\houjinongfuai\docs\uat\uat-plan-v1.md`
+3. `<BUSINESS_REPO_ROOT>\docs\uat\uat-plan-v1.md`
 4. local browser acceptance evidence
 
 ### D. Seed, data, or reset failure
@@ -74,7 +74,7 @@ Read first:
 1. `PROJECT-CONFIG-REGISTRY.md`
 2. backend `package.json` scripts
 3. backend seed and cleanup scripts
-4. `D:\20251211\zhinengti\houjinongfuai\docs\README.md`
+4. `<BUSINESS_REPO_ROOT>\docs\README.md`
 
 ### E. Runtime or device-report scenario failure
 
@@ -87,7 +87,7 @@ Typical signals:
 
 Read first:
 
-1. `D:\20251211\zhinengti\houjinongfuai\docs\uat\uat-plan-v1.md`
+1. `<BUSINESS_REPO_ROOT>\docs\uat\uat-plan-v1.md`
 2. backend integration and e2e tests
 3. backend `test/support/seed-scenarios.ts`
 4. embedded handoff package if runtime protocol truth is involved
@@ -102,10 +102,10 @@ Typical signals:
 
 Read first:
 
-1. `D:\20251211\zhinengti\houjinongfuai\embeddedcomhis\CURRENT.md`
-2. `D:\20251211\zhinengti\houjinongfuai\embeddedcomhis\README.md`
-3. `D:\20251211\zhinengti\houjinongfuai\hardwarecomhis\CURRENT.md`
-4. `D:\20251211\zhinengti\houjinongfuai\hardwarecomhis\README.md`
+1. `<BUSINESS_REPO_ROOT>\embeddedcomhis\CURRENT.md`
+2. `<BUSINESS_REPO_ROOT>\embeddedcomhis\README.md`
+3. `<BUSINESS_REPO_ROOT>\hardwarecomhis\CURRENT.md`
+4. `<BUSINESS_REPO_ROOT>\hardwarecomhis\README.md`
 
 If embedded or hardware is paused, do not pretend the runtime/device issue is closed.
 
@@ -115,8 +115,8 @@ If embedded or hardware is paused, do not pretend the runtime/device issue is cl
 
 Current place to look:
 
-- `D:\20251211\zhinengti\lovable\playwright.config.ts`
-- `D:\20251211\zhinengti\lovable\playwright-fixture.ts`
+- `<FRONTEND_REPO_ROOT>\playwright.config.ts`
+- `<FRONTEND_REPO_ROOT>\playwright-fixture.ts`
 
 ### Backend or protocol simulation
 

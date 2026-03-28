@@ -33,6 +33,14 @@ Bootstrap entry:
 - `role-init/embedded_engineer.md`
 - `role-init/hardware_engineer.md`
 
+## If the domain is unclear
+
+Read:
+
+- `DOMAIN-NAVIGATION.md`
+
+before guessing which role should own the work.
+
 ## Shared rule
 
 - `CURRENT.md` is still the live dispatch entry for software-engineer execution.

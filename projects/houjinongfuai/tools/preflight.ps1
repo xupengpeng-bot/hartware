@@ -1,11 +1,12 @@
 param(
-    [string]$BusinessRoot = 'D:\20251211\zhinengti\houjinongfuai',
-    [string]$FrontendRoot = 'D:\20251211\zhinengti\lovable'
+    [string]$BusinessRoot = $(Join-Path (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)))) 'houjinongfuai'),
+    [string]$FrontendRoot = $(Join-Path (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)))) 'lovable')
 )
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $ProjectsRoot = Split-Path -Parent $ProjectRoot
 $DevSystemRoot = Split-Path -Parent $ProjectsRoot
+$WorkspaceRoot = Split-Path -Parent $DevSystemRoot
 $Checks = @()
 
 function Add-Check {
@@ -73,6 +74,8 @@ function Test-TextForReplacementChar {
 
 $CurrentFile = Join-Path $ProjectRoot 'docs\codex\CURRENT.md'
 $ResultFile = Join-Path $ProjectRoot 'docs\codex\RESULT.md'
+$StartHereFile = Join-Path $ProjectRoot 'docs\codex\START-HERE.md'
+$DomainNavigationFile = Join-Path $ProjectRoot 'docs\codex\DOMAIN-NAVIGATION.md'
 $TaskTypesFile = Join-Path $ProjectRoot 'docs\codex\TASK-TYPES.md'
 $TaskDispatchTemplateFile = Join-Path $ProjectRoot 'docs\codex\TASK-DISPATCH-TEMPLATE.md'
 $RemoteBootstrapFile = Join-Path $ProjectRoot 'docs\codex\REMOTE-FIRST-BOOTSTRAP.md'
@@ -114,6 +117,8 @@ else {
 
 Test-RequiredPath -Name 'current file' -Path $CurrentFile
 Test-RequiredPath -Name 'result file' -Path $ResultFile
+Test-RequiredPath -Name 'start-here file' -Path $StartHereFile
+Test-RequiredPath -Name 'domain-navigation file' -Path $DomainNavigationFile
 Test-RequiredPath -Name 'task types file' -Path $TaskTypesFile
 Test-RequiredPath -Name 'task dispatch template' -Path $TaskDispatchTemplateFile
 Test-RequiredPath -Name 'remote-first bootstrap file' -Path $RemoteBootstrapFile

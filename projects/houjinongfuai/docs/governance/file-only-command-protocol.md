@@ -7,11 +7,11 @@ Purpose: let the user trigger work by saying only "execute" to a named team, whi
 ## Workspace anchors
 
 - development-system workspace:
-  - `D:\20251211\zhinengti\development-system\projects\houjinongfuai`
+  - `<PROJECT_DEV_ROOT>`
 - backend business-code workspace:
-  - `D:\20251211\zhinengti\houjinongfuai`
+  - `<BUSINESS_REPO_ROOT>`
 - frontend workspace:
-  - `D:\20251211\zhinengti\lovable`
+  - `<FRONTEND_REPO_ROOT>`
 
 ## Core rule
 
@@ -32,7 +32,7 @@ Task-type hard gate:
 Requirement gate:
 
 - before dispatching executable engineering work, PM should first freeze the corresponding business requirement in the business repository
-- requirement docs are human-facing artifacts in `D:\20251211\zhinengti\houjinongfuai\docs\requirements` and related business-doc folders
+- requirement docs are human-facing artifacts in `<BUSINESS_REPO_ROOT>\docs\requirements` and related business-doc folders
 - task sheets in this workspace are execution artifacts, not requirement substitutes
 - `definition-of-ready.md` is the minimum readiness gate before executable dispatch
 
@@ -48,5 +48,5 @@ Development-system evolution rule:
 ## Path rule
 
 - Treat this development-system workspace as the rule / dispatch anchor.
-- Treat `D:\20251211\zhinengti\houjinongfuai` as the backend business-code anchor.
-- Treat `D:\20251211\zhinengti\lovable` as the frontend workspace unless PM freezes another location in the active task.
+- Treat `<BUSINESS_REPO_ROOT>` as the backend business-code anchor.
+- Treat `<FRONTEND_REPO_ROOT>` as the frontend workspace unless PM freezes another location in the active task.

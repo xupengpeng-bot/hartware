@@ -28,9 +28,9 @@ These are valid starting points.
 
 ## Required reading order for marketing work
 
-1. `D:\20251211\zhinengti\houjinongfuai\docs\README.md`
-2. `D:\20251211\zhinengti\houjinongfuai\docs\requirements\README.md`
-3. the business system-docs README under `D:\20251211\zhinengti\houjinongfuai\docs`
+1. `<BUSINESS_REPO_ROOT>\docs\README.md`
+2. `<BUSINESS_REPO_ROOT>\docs\requirements\README.md`
+3. the business system-docs README under `<BUSINESS_REPO_ROOT>\docs`
 4. the relevant business overview / overall requirement / requirement-breakdown docs linked from the system-docs README
 5. `PROJECT-MARKETING-BRIEF.md`
 6. relevant execution history or current milestone notes when the material depends on delivery status

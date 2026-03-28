@@ -14,8 +14,8 @@ Important:
 ## Path baseline
 
 - Treat this development-system workspace as the rule / dispatch workspace.
-- Treat `D:\20251211\zhinengti\houjinongfuai` as the backend business-code workspace.
-- Treat `D:\20251211\zhinengti\lovable` as the frontend workspace unless a task file explicitly freezes another path.
+- Treat `<BUSINESS_REPO_ROOT>` as the backend business-code workspace.
+- Treat `<FRONTEND_REPO_ROOT>` as the frontend workspace unless a task file explicitly freezes another path.
 
 ## Modes
 

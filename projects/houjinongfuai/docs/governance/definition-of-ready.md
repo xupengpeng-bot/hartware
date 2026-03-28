@@ -73,7 +73,7 @@ Every executable task should provide at least:
 ### Ready example
 
 - requirement source:
-  - a requirement doc linked from `D:\20251211\zhinengti\houjinongfuai\docs\README.md`
+- a requirement doc linked from `<BUSINESS_REPO_ROOT>\docs\README.md`
 - task type:
   - `ENGINEERING`
 - task category:

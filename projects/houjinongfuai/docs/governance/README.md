@@ -6,7 +6,7 @@ Audience: PM and all delivery roles
 This folder is part of the external development-system workspace for:
 
 - business-code workspace:
-  - `D:\20251211\zhinengti\houjinongfuai`
+- `<BUSINESS_REPO_ROOT>`
 
 Use this folder for:
 
