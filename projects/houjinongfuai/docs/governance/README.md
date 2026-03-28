@@ -1,4 +1,4 @@
-﻿# Governance Docs
+# Governance Docs
 
 Status: active
 Audience: PM and all delivery roles
@@ -17,3 +17,4 @@ Use this folder for:
 - development-process rules
 - requirement-to-task decomposition rules
 - definition-of-ready
+- project-specific preflight and execution helpers

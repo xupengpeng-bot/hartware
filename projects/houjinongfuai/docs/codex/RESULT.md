@@ -1,4 +1,4 @@
-﻿# Codex Result
+# Codex Result
 
 Status: active-template
 Audience: Codex and PM
@@ -16,6 +16,7 @@ Purpose: overwrite the latest-result section after each execution. Keep the fiel
 8. frontend impact
 9. pending issues
 10. next handoff target
+11. development-system improvement candidates
 
 ## Latest result
 
@@ -43,7 +44,7 @@ Purpose: overwrite the latest-result section after each execution. Keep the fiel
   - **地图/列表展示**：**`effective_*`**、**`map_display_*`**、**`location_read_model.mapDisplay`**；**`location_read_model.layersContract`** 为机器可读分层说明。
   - **下游稳定引用**：已发布 **`network_model_version_id`** + 图；空间坐标引用 **`effective_*`**，**不得**把地图画布临时坐标当 DB 真相。
   - **写边界**：资产 **POST/PUT** 显式 **400**（**`SPATIAL_WRITE_BOUNDARY`**）；设备 **DTO whitelist** + service **assert**。
-  - **保留前期收口**：PumpValve/Topology、**`network_model_version`** 发布态、**solver 仅已发布图** — 未回滚。
+  - **保留前期收口**：PumpValve/Topology、**`network_model_version`** 发布态、**solver 仅已发布图** - 未回滚。
 - verification result
   - **`npm run build`**：**通过**
   - **`npm run test:unit`**：**通过**（28 tests）
@@ -56,3 +57,5 @@ Purpose: overwrite the latest-result section after each execution. Keep the fiel
   - 无（本 **`COD-035`** 空间子包按约定全量收口）
 - next handoff target
   - 前端按契约绑定展示与搜索字段；画布坐标仅在提交到 **manual** 前为草稿
+- development-system improvement candidates
+  - none

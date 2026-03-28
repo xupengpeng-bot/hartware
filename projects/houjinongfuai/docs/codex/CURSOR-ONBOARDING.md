@@ -1,4 +1,4 @@
-﻿# Cursor Onboarding
+# Cursor Onboarding
 
 Status: active
 Audience: Cursor
@@ -55,17 +55,21 @@ You must obey these repository-level rules:
 Always read in this order:
 
 1. `D:\20251211\zhinengti\houjinongfuai\AGENTS.md`
-2. `D:\20251211\zhinengti\houjinongfuai\docs\系统说明\通用产品规则.md`
+2. `D:\20251211\zhinengti\houjinongfuai\docs\README.md`
 3. `docs/codex/CURRENT.md`
 4. `docs/codex/WORK-MODES.md`
 5. `docs/codex/TASK-TYPES.md`
-6. `docs/governance/file-only-command-protocol.md`
-7. `docs/governance/requirements-to-tasks-rule.md`
-8. `docs/governance/definition-of-ready.md`
-9. `docs/governance/delivery-workflow.md`
-10. `docs/governance/current-wave-2026-03-24.md`
-11. the active task file linked from `CURRENT.md`
-12. `docs/codex/RESULT.md`
+6. `D:\20251211\zhinengti\development-system\shared\global-rules\task-taxonomy-matrix.md`
+7. `D:\20251211\zhinengti\development-system\shared\global-rules\encoding-governance.md`
+8. `D:\20251211\zhinengti\development-system\shared\global-rules\development-system-evolution-rule.md`
+9. `D:\20251211\zhinengti\development-system\shared\global-rules\windows-path-governance.md`
+10. `docs/governance/file-only-command-protocol.md`
+11. `docs/governance/requirements-to-tasks-rule.md`
+12. `docs/governance/definition-of-ready.md`
+13. `docs/governance/delivery-workflow.md`
+14. `docs/governance/current-wave-2026-03-24.md`
+15. the active task file linked from `CURRENT.md`
+16. `docs/codex/RESULT.md`
 
 If the task touches frontend coordination, also read:
 
@@ -106,3 +110,4 @@ Dispatch hard gate:
 - Do not execute from chat alone.
 - If `CURRENT.md` does not explicitly name the active task, task type, mode, and execute-now instruction, treat the task as not dispatched.
 - Reporting `no active task` in this case is the correct behavior.
+- If you discover a better workflow, script, encoding guardrail, or reusable check during delivery, report it as a development-system improvement candidate instead of silently changing the system scope.

@@ -1,4 +1,4 @@
-﻿# Codex Docs
+# Codex Docs
 
 Status: active
 Audience: PM and software engineer
@@ -24,6 +24,13 @@ Live software-engineer work is dispatched through this development-system worksp
 - `docs/codex/CLOUD-DEVELOPMENT-WORKFLOW.md`
 - `docs/governance/file-only-command-protocol.md`
 - `docs/governance/delivery-workflow.md`
+- `D:\20251211\zhinengti\development-system\shared\global-rules\encoding-governance.md`
+- `D:\20251211\zhinengti\development-system\shared\global-rules\development-system-evolution-rule.md`
+- `D:\20251211\zhinengti\development-system\shared\global-rules\windows-path-governance.md`
+
+Preflight helper:
+
+- `tools/preflight.ps1`
 
 Business sync note still lives with the codebase:
 

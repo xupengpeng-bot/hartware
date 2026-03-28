@@ -1,4 +1,4 @@
-﻿# Houjinongfuai Development System
+# Houjinongfuai Development System
 
 Status: active
 Audience: PM, software engineer, Cursor, Codex, Lovable
@@ -20,3 +20,11 @@ When starting work for this project:
 1. read business boundaries from `D:\20251211\zhinengti\houjinongfuai\AGENTS.md`
 2. read dispatch and workflow docs in this development-system workspace
 3. execute only the active typed task
+
+## Cross-device note
+
+On a new machine, run:
+
+- `.\tools\preflight.ps1`
+
+before assuming the environment is ready for active delivery.

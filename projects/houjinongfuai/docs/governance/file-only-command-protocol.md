@@ -1,4 +1,4 @@
-﻿# File-Only Command Protocol
+# File-Only Command Protocol
 
 Status: active
 Audience: PM, software engineer, embedded engineer, hardware engineer, Lovable
@@ -35,6 +35,15 @@ Requirement gate:
 - requirement docs are human-facing artifacts in `D:\20251211\zhinengti\houjinongfuai\docs\requirements` and related business-doc folders
 - task sheets in this workspace are execution artifacts, not requirement substitutes
 - `definition-of-ready.md` is the minimum readiness gate before executable dispatch
+
+Development-system evolution rule:
+
+- development-system improvements discovered during delivery must be recorded as candidates, not silently executed as hidden scope expansion
+- classify them as:
+  - task type `SYSTEM`
+  - shared category `development_system`
+- write them back in `RESULT.md` under `development-system improvement candidates`
+- PM may later freeze them into a separate executable task
 
 ## Path rule
 

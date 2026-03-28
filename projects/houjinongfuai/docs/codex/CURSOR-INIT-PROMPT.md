@@ -1,33 +1,57 @@
-﻿# Cursor Init Prompt
+# Cursor Init Prompt
 
-Assume the current opened workspace is the backend repository root.
-Assume the real frontend repository is the sibling folder `../lovable` unless PM says otherwise in the active task.
+Assume the current opened workspace is the development-system project root:
+
+- `D:\20251211\zhinengti\development-system\projects\houjinongfuai`
+
+Assume the business repository is:
+
+- `D:\20251211\zhinengti\houjinongfuai`
+
+Assume the real frontend repository is the sibling folder:
+
+- `D:\20251211\zhinengti\lovable`
 
 Before reading files, sync Git:
 
-1. In the current workspace root:
+1. In the business repository root:
    - `git fetch --all --prune`
    - `git checkout main`
    - `git pull --ff-only origin main`
-2. If the task touches frontend `SYNC` or `VERIFY`, also run in sibling repo `../lovable`:
+2. In the development-system repository root:
    - `git fetch --all --prune`
    - `git checkout main`
    - `git pull --ff-only origin main`
+3. If the task touches frontend `SYNC` or `VERIFY`, also run in sibling repo `D:\20251211\zhinengti\lovable`:
+   - `git fetch --all --prune`
+   - `git checkout main`
+   - `git pull --ff-only origin main`
+
+On a new machine, run:
+
+- `.\tools\preflight.ps1`
+
+from `D:\20251211\zhinengti\development-system\projects\houjinongfuai` before assuming the environment is ready.
 
 Read these files first and use them as the only source of truth:
 
-1. `./AGENTS.md`
-2. `./docs/codex/CURSOR-ONBOARDING.md`
-3. `./docs/codex/CURRENT.md`
-4. `./docs/codex/WORK-MODES.md`
-5. `./docs/codex/TASK-TYPES.md`
-6. `./docs/governance/file-only-command-protocol.md`
-7. `./docs/governance/requirements-to-tasks-rule.md`
-8. `./docs/governance/definition-of-ready.md`
-9. `./docs/governance/delivery-workflow.md`
-10. `./docs/governance/current-wave-2026-03-24.md`
-11. the active task file linked from `CURRENT.md`
-12. `./docs/codex/RESULT.md`
+1. `D:\20251211\zhinengti\houjinongfuai\AGENTS.md`
+2. `D:\20251211\zhinengti\houjinongfuai\docs\README.md`
+3. `.\docs\codex\CURSOR-ONBOARDING.md`
+4. `.\docs\codex\CURRENT.md`
+5. `.\docs\codex\WORK-MODES.md`
+6. `.\docs\codex\TASK-TYPES.md`
+7. `D:\20251211\zhinengti\development-system\shared\global-rules\task-taxonomy-matrix.md`
+8. `D:\20251211\zhinengti\development-system\shared\global-rules\encoding-governance.md`
+9. `D:\20251211\zhinengti\development-system\shared\global-rules\development-system-evolution-rule.md`
+10. `D:\20251211\zhinengti\development-system\shared\global-rules\windows-path-governance.md`
+11. `.\docs\governance\file-only-command-protocol.md`
+12. `.\docs\governance\requirements-to-tasks-rule.md`
+13. `.\docs\governance\definition-of-ready.md`
+14. `.\docs\governance\delivery-workflow.md`
+15. `.\docs\governance\current-wave-2026-03-24.md`
+16. the active task file linked from `CURRENT.md`
+17. `.\docs\codex\RESULT.md`
 
 You are the local software engineer for this project.
 
@@ -42,6 +66,7 @@ You must obey these rules:
 - frontend must not directly call third-party business or geoservice endpoints unless PM explicitly freezes an exception
 - if queue state and entry files disagree, stop and report the mismatch
 - if you detect repeated dispatch with no real state change, report a logic-loop risk immediately
+- if you discover a better workflow, encoding guardrail, or reusable check during delivery, report it as a development-system improvement candidate instead of silently expanding the active task
 
 Your output after every run must include:
 

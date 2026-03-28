@@ -117,6 +117,26 @@ $PSVersionTable.PSVersion
 - 当前仓库脚本直接按 Windows PowerShell 运行，没有要求 `pwsh`
 - 新机器至少保证 `powershell.exe` 可用
 
+### 2.6 Windows 长路径支持
+
+- 作用：降低 Git checkout、依赖安装、深层目录读写失败的返工风险
+- 当前机器实测：
+  - `LongPathsEnabled = 1`
+- 命令检查：
+
+```powershell
+Get-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\FileSystem' -Name LongPathsEnabled
+```
+
+建议：
+
+- 新机器保持系统级长路径支持开启
+- 同时在活跃仓库执行：
+
+```powershell
+git config core.longpaths true
+```
+
 ## 3. 当前仓库启动所需本地配置
 
 ### 3.1 后端 `.env`
@@ -401,6 +421,15 @@ npm run build
 npm run test:unit
 ```
 
+再进入开发体系仓库执行：
+
+```powershell
+cd D:\20251211\zhinengti\development-system\projects\houjinongfuai
+.\tools\preflight.ps1
+```
+
+通过后再开始读取 `CURRENT.md` 和 active task。
+
 如果需要前端联调，再确认：
 
 ```powershell
@@ -436,3 +465,24 @@ npm run dev
 - `SEGGER J-Link`
 - `Keil MDK`
 - 串口调试工具（PuTTY / Tera Term / SSCOM 任一）
+
+## 12. 编码与文档可读性补充
+
+新机器不要忽略编码问题。当前项目的 Windows-first 协作里，编码错误会直接影响入口文档读取和任务理解。
+
+规则：
+
+- 中文或其他非 ASCII 的开发体系文档，优先使用 `UTF-8 with BOM`
+- 不要把带中文的 tracked 文本文件保存成 ANSI / GBK
+- 不要对整个代码库做无差别批量转码
+- 开工前用 `.\tools\preflight.ps1` 检查关键入口文件是否存在乱码或替代字符
+
+## 13. Windows 路径补充
+
+为降低 Windows 平台返工，建议长期保持：
+
+- 工作区根目录尽量短，例如 `D:\20251211\zhinengti`
+- 开发体系仓库与业务仓库平级，不继续深层嵌套
+- 新任务文件名保持清晰但不要过长
+- Git 仓库启用 `core.longpaths`
+- 开工前运行 `.\tools\preflight.ps1`

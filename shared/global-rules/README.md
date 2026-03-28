@@ -1,4 +1,4 @@
-﻿# Shared Global Rules
+# Shared Global Rules
 
 Status: active
 Audience: PM, engineers, AI agents
@@ -8,6 +8,9 @@ Purpose: hold shared development-system rules that are not business-specific.
 
 - `task-categories.md`
 - `task-taxonomy-matrix.md`
+- `encoding-governance.md`
+- `development-system-evolution-rule.md`
+- `windows-path-governance.md`
 - `change-log.md`
 
 ## Boundary

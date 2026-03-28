@@ -1,4 +1,4 @@
-﻿# Development System
+# Development System
 
 Status: active
 Audience: PM, engineers, AI agents
@@ -20,6 +20,8 @@ Purpose: keep development-system assets separate from business repositories.
 
 - `shared/global-rules`
   - cross-project task classification and other shared development-system rules
+  - encoding governance for Windows-first, Chinese-content workflows
+  - development-system evolution rules for process improvements found during delivery
 
 ## Separation rule
 
@@ -27,3 +29,4 @@ Purpose: keep development-system assets separate from business repositories.
 - development-system workspace holds onboarding, dispatch, workflow, governance, and execution rules
 - business requirements are confirmed in the business repository first
 - AI execution tasks are decomposed afterwards inside the project development-system workspace
+- development-system improvements discovered during real delivery are recorded here as `SYSTEM` work, not mixed into business requirements

@@ -1,4 +1,4 @@
-﻿# Cursor Current
+# Cursor Current
 
 Status: active
 Audience: Cursor
@@ -29,21 +29,26 @@ Purpose: this is the live software-engineer execution entry in the external deve
 ## Read order
 
 1. `D:\20251211\zhinengti\houjinongfuai\AGENTS.md`
-2. `D:\20251211\zhinengti\houjinongfuai\docs\系统说明\通用产品规则.md`
+2. `D:\20251211\zhinengti\houjinongfuai\docs\README.md`
 3. `docs/codex/CURRENT.md`
 4. `docs/codex/WORK-MODES.md`
 5. `docs/codex/TASK-TYPES.md`
-6. `docs/governance/file-only-command-protocol.md`
-7. `docs/governance/requirements-to-tasks-rule.md`
-8. `docs/governance/definition-of-ready.md`
-9. `docs/governance/delivery-workflow.md`
-10. `docs/governance/current-wave-2026-03-24.md`
-11. the active task file linked from `CURRENT.md`
-12. `docs/codex/RESULT.md`
+6. `D:\20251211\zhinengti\development-system\shared\global-rules\task-taxonomy-matrix.md`
+7. `D:\20251211\zhinengti\development-system\shared\global-rules\encoding-governance.md`
+8. `D:\20251211\zhinengti\development-system\shared\global-rules\development-system-evolution-rule.md`
+9. `D:\20251211\zhinengti\development-system\shared\global-rules\windows-path-governance.md`
+10. `docs/governance/file-only-command-protocol.md`
+11. `docs/governance/requirements-to-tasks-rule.md`
+12. `docs/governance/definition-of-ready.md`
+13. `docs/governance/delivery-workflow.md`
+14. `docs/governance/current-wave-2026-03-24.md`
+15. the active task file linked from `CURRENT.md`
+16. `docs/codex/RESULT.md`
 
 ## Allowed working area
 
 - development-system docs in this folder
+- development-system helper scripts in `D:\20251211\zhinengti\development-system\projects\houjinongfuai\tools`
 - business-code backend in `D:\20251211\zhinengti\houjinongfuai\backend`
 - business-code docs in `D:\20251211\zhinengti\houjinongfuai\docs` when the active task requires them
 
@@ -59,6 +64,7 @@ Purpose: this is the live software-engineer execution entry in the external deve
 - If `active task = none`, report `no active task` and stop.
 - If `task type = none`, report `task type missing` and stop.
 - Do not treat chat discussion, architecture discussion, governance discussion, or curiosity questions as executable work unless PM freezes them into the active task files.
+- If a task reveals a useful process or tooling improvement, report it as a development-system improvement candidate instead of silently expanding scope.
 
 ## Hard constraints
 
