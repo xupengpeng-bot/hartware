@@ -35,8 +35,9 @@ They are not yet executable task truth.
    - UAT findings
 4. requirements engineer updates or creates requirement truth in the business repository
 5. if this is a requirement change, mark the global impact surface explicitly
-6. PM freezes the requirement scope enough for delivery
-7. executable tasks are decomposed afterwards
+6. PM confirms the requirement understanding or change-impact package when needed
+7. PM freezes the requirement scope enough for delivery
+8. executable tasks are decomposed afterwards
 
 ## Inputs for requirement analysis
 
@@ -80,3 +81,7 @@ Requirements engineering may end with:
 If the requirement was changed rather than newly added, the output should also include impact markers for downstream executors.
 
 It does not automatically mean code should change in the same round.
+
+## Confirmation loop
+
+Use `requirement-confirmation-loop.md` and `REQUIREMENT-CONFIRMATION-TEMPLATE.md` when PM confirmation is needed before execution.

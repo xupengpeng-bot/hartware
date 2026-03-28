@@ -19,6 +19,8 @@ Use this folder for:
 - requirements-engineering standard
 - requirement-change impact standard
 - requirement-change template
+- requirement confirmation loop
+- requirement confirmation template
 - role-based delivery model
 - end-to-end delivery model
 - OpenHands adaptation plan in `automation/openhands/adaptation-plan.md`

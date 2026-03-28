@@ -118,6 +118,7 @@ Gate:
 The work should not become executable until:
 
 - requirement source exists
+- requirement understanding or requirement-change confirmation has happened when needed
 - task type is explicit
 - owner role is explicit
 - allowed working area is explicit
@@ -217,7 +218,8 @@ This is achievable if the system obeys three hard rules:
 
 1. fuzzy demand enters through orchestration, not directly through engineering
 2. requirement changes surface global impact before execution
-3. verification and cleanup are never optional stages
+3. PM confirms the high-risk misunderstanding points instead of micromanaging every task
+4. verification and cleanup are never optional stages
 
 ## What still cannot be skipped
 
