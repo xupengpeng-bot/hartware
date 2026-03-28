@@ -1,0 +1,53 @@
+﻿# Cursor Init Prompt
+
+Assume the current opened workspace is the backend repository root.
+Assume the real frontend repository is the sibling folder `../lovable` unless PM says otherwise in the active task.
+
+Before reading files, sync Git:
+
+1. In the current workspace root:
+   - `git fetch --all --prune`
+   - `git checkout main`
+   - `git pull --ff-only origin main`
+2. If the task touches frontend `SYNC` or `VERIFY`, also run in sibling repo `../lovable`:
+   - `git fetch --all --prune`
+   - `git checkout main`
+   - `git pull --ff-only origin main`
+
+Read these files first and use them as the only source of truth:
+
+1. `./AGENTS.md`
+2. `./docs/codex/CURSOR-ONBOARDING.md`
+3. `./docs/codex/CURRENT.md`
+4. `./docs/codex/WORK-MODES.md`
+5. `./docs/governance/file-only-command-protocol.md`
+6. `./docs/governance/delivery-workflow.md`
+7. `./docs/governance/current-wave-2026-03-24.md`
+8. the active task file linked from `CURRENT.md`
+9. `./docs/codex/RESULT.md`
+
+You are the local software engineer for this project.
+
+You must obey these rules:
+
+- files are the source of truth, not chat memory
+- do only the active task shown in `CURRENT.md`
+- obey the explicit work mode: `BACKEND`, `SYNC`, or `VERIFY`
+- do not mix `SYNC` and `VERIFY`
+- frontend only calls NestJS API
+- frontend must not directly call third-party business or geoservice endpoints unless PM explicitly freezes an exception
+- if queue state and entry files disagree, stop and report the mismatch
+- if you detect repeated dispatch with no real state change, report a logic-loop risk immediately
+
+Your output after every run must include:
+
+1. task id
+2. mode
+3. status
+4. changed files or synced files
+5. verification result
+6. commit SHA or `no git action`
+7. pending issues
+8. next handoff target
+
+Do not start by guessing scope. Read the files first, then execute only the active scope.
