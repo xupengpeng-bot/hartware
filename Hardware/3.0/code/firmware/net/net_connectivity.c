@@ -38,11 +38,25 @@ void net_connectivity_poll(uint32_t monotonic_ms)
     (void)monotonic_ms;
     net_4g_modem_poll();
     common_status_set_online(net_4g_modem_is_online());
+
+    if (s_sock.connected != 0 && net_4g_modem_tcp_is_connected() == 0) {
+        net_socket_client_disconnect(&s_sock);
+    }
     common_status_set_tcp_connected(s_sock.connected != 0);
 
-    /* BSP：从模组读取字节后调用 net_socket_client_feed(chunk, len, ...)。 */
-    size_t jlen = 0U;
-    if (net_socket_client_feed(&s_sock, NULL, 0U, s_nc_json, sizeof(s_nc_json), &jlen) == 1) {
+    {
+        uint8_t chunk[512];
+        size_t  n;
+        while ((n = net_4g_modem_tcp_rx_pop(chunk, sizeof(chunk))) > 0U) {
+            (void)net_socket_client_feed(&s_sock, chunk, n, s_nc_json, sizeof(s_nc_json), NULL);
+        }
+    }
+
+    for (;;) {
+        size_t jlen = 0U;
+        if (net_socket_client_feed(&s_sock, NULL, 0U, s_nc_json, sizeof(s_nc_json), &jlen) != 1) {
+            break;
+        }
         size_t rlen = 0U;
         (void)proto_dispatch_handle_inbound(s_nc_json, jlen, s_nc_reply, sizeof(s_nc_reply), &rlen);
         if (rlen > 0U) {

@@ -2,6 +2,10 @@
 #include "proto_envelope.h"
 #include <string.h>
 
+#if defined(BOARD_STM32F103)
+#include "net_4g_modem.h"
+#endif
+
 void net_socket_client_init(net_socket_client_t *c)
 {
     if (!c) {
@@ -14,13 +18,22 @@ void net_socket_client_init(net_socket_client_t *c)
 
 int net_socket_client_connect(net_socket_client_t *c, const char *host, uint16_t port)
 {
-    (void)host;
-    (void)port;
     if (!c) {
+        return -1;
+    }
+#if defined(BOARD_STM32F103)
+    if (net_4g_modem_tcp_connect(host, port) != 0) {
+        c->connected = 0;
         return -1;
     }
     c->connected = 1;
     return 0;
+#else
+    (void)host;
+    (void)port;
+    c->connected = 1;
+    return 0;
+#endif
 }
 
 void net_socket_client_disconnect(net_socket_client_t *c)
@@ -28,17 +41,42 @@ void net_socket_client_disconnect(net_socket_client_t *c)
     if (!c) {
         return;
     }
+#if defined(BOARD_STM32F103)
+    net_4g_modem_tcp_close();
+#endif
     c->connected = 0;
     c->rx_len = 0U;
 }
 
 int net_socket_client_send(net_socket_client_t *c, const uint8_t *data, size_t len)
 {
+    if (!c || !data || len == 0U) {
+        return 0;
+    }
+#if defined(BOARD_STM32F103)
+    if (c->connected == 0 || net_4g_modem_tcp_is_connected() == 0) {
+        return -1;
+    }
+    {
+        size_t   total = 0U;
+        const uint8_t *p = data;
+        size_t   remain = len;
+        while (remain > 0U) {
+            size_t chunk = remain > 1460U ? 1460U : remain;
+            int    w     = net_4g_modem_tcp_send(p, chunk);
+            if (w < 0) {
+                return -1;
+            }
+            total += (size_t)w;
+            p += chunk;
+            remain -= chunk;
+        }
+        return (int)total;
+    }
+#else
     (void)c;
-    (void)data;
-    (void)len;
-    /* BSP / LWIP: implement send. */
     return 0;
+#endif
 }
 
 static void shift_left(net_socket_client_t *c, size_t n)
