@@ -36,7 +36,6 @@
 
 #include <string.h>
 
-static char s_proto_reg_buf[2048];
 #include <stdio.h>
 
 static int cb_register_build(char *buf, size_t cap, void *user)
@@ -144,8 +143,6 @@ void app_main_init(void)
     common_alarm_init();
 
     controller_identity_t *id = common_identity_mutable();
-    (void)strncpy(id->imei, "864869000000001", sizeof(id->imei) - 1U);
-    (void)strncpy(id->iccid, "89860000000000000000", sizeof(id->iccid) - 1U);
 
     resource_inventory_t *ri = common_resource_inventory_mutable();
     ri->ai_count         = 4U;
@@ -192,13 +189,8 @@ void app_main_init(void)
     app_health_init();
     app_scheduler_init();
 
-    int n = proto_register_build(s_proto_reg_buf, sizeof(s_proto_reg_buf));
-    bsp_debug_log("[INIT] proto_register_build\r\n");
-    if (n > 0) {
-        (void)net_connectivity_send_json(s_proto_reg_buf, (size_t)n);
-    }
-    common_status_set_registered(true);
-    bsp_debug_log("[INIT] DONE (registered=true)\r\n");
+    bsp_debug_log("[INIT] register will be sent after tcp connect\r\n");
+    bsp_debug_log("[INIT] DONE\r\n");
 }
 
 void app_main_loop_iteration(uint32_t monotonic_ms)

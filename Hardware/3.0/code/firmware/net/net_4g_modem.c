@@ -2,7 +2,10 @@
 #include "board_hw_config.h"
 #include "bsp_system.h"
 #include "bsp_uart.h"
+#include "common_identity.h"
+#include "common_status.h"
 
+#include <stdio.h>
 #include <string.h>
 
 /* EC801 is wired to UART4 (PC10/PC11) and NET_PWRKEY on PB5. */
@@ -53,6 +56,109 @@ static void modem_pwrkey_set(int level)
 #endif
 
 static int s_online;
+
+static void modem_drain_rx(void);
+
+static int modem_read_line(char *line, size_t cap, uint32_t timeout_ms)
+{
+    size_t len = 0U;
+    uint8_t ch = 0U;
+    uint32_t waited = 0U;
+
+    if (line == NULL || cap < 2U) {
+        return 0;
+    }
+    line[0] = '\0';
+
+    while (waited < timeout_ms) {
+        if (bsp_uart_read((int)BOARD_HW_UART_PORT_MODEM_4G, &ch, 1U) > 0) {
+            if (ch == '\r') {
+                continue;
+            }
+            if (ch == '\n') {
+                if (len == 0U) {
+                    continue;
+                }
+                line[len] = '\0';
+                return 1;
+            }
+            if (len + 1U < cap) {
+                line[len++] = (char)ch;
+                line[len] = '\0';
+            }
+            continue;
+        }
+        bsp_system_delay_ms(10U);
+        waited += 10U;
+    }
+
+    if (len > 0U) {
+        line[len] = '\0';
+        return 1;
+    }
+    return 0;
+}
+
+static void modem_query_identity(void)
+{
+    controller_identity_t *id = common_identity_mutable();
+    char line[96];
+
+    modem_drain_rx();
+    (void)bsp_uart_write((int)BOARD_HW_UART_PORT_MODEM_4G, (const uint8_t *)"AT+GSN\r\n", 8U);
+    while (modem_read_line(line, sizeof(line), 1000U) == 1) {
+        if (strcmp(line, "OK") == 0) {
+            break;
+        }
+        if (strcmp(line, "ERROR") == 0) {
+            break;
+        }
+        if (line[0] >= '0' && line[0] <= '9') {
+            (void)strncpy(id->imei, line, sizeof(id->imei) - 1U);
+            id->imei[sizeof(id->imei) - 1U] = '\0';
+        }
+    }
+
+    modem_drain_rx();
+    (void)bsp_uart_write((int)BOARD_HW_UART_PORT_MODEM_4G, (const uint8_t *)"AT+QCCID\r\n", 10U);
+    while (modem_read_line(line, sizeof(line), 1000U) == 1) {
+        if (strcmp(line, "OK") == 0) {
+            break;
+        }
+        if (strcmp(line, "ERROR") == 0) {
+            break;
+        }
+        if (strncmp(line, "+QCCID:", 7) == 0) {
+            const char *value = line + 7;
+            while (*value == ' ') {
+                value++;
+            }
+            (void)strncpy(id->iccid, value, sizeof(id->iccid) - 1U);
+            id->iccid[sizeof(id->iccid) - 1U] = '\0';
+        }
+    }
+}
+
+static void modem_query_signal_once(void)
+{
+    char line[64];
+    int csq = 0;
+    int ber = 0;
+
+    modem_drain_rx();
+    (void)bsp_uart_write((int)BOARD_HW_UART_PORT_MODEM_4G, (const uint8_t *)"AT+CSQ\r\n", 8U);
+    while (modem_read_line(line, sizeof(line), 1000U) == 1) {
+        if (strcmp(line, "OK") == 0) {
+            break;
+        }
+        if (strcmp(line, "ERROR") == 0) {
+            break;
+        }
+        if (sscanf(line, "+CSQ: %d,%d", &csq, &ber) == 2) {
+            common_status_set_signal((int16_t)csq, 0, 0);
+        }
+    }
+}
 
 static void modem_drain_rx(void)
 {
@@ -132,6 +238,8 @@ void net_4g_modem_init(void)
 
     if (modem_probe_online() != 0) {
         s_online = 1;
+        modem_query_identity();
+        modem_query_signal_once();
         bsp_debug_log("[4G] modem responded to AT\r\n");
     } else {
         bsp_debug_log("[4G] modem did not respond to AT\r\n");
@@ -145,4 +253,5 @@ bool net_4g_modem_is_online(void)
 
 void net_4g_modem_poll(void)
 {
+    /* Keep socket traffic exclusive on the modem UART during runtime. */
 }
