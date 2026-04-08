@@ -21,7 +21,7 @@ if "%~2"=="" (
     if defined SERIAL_LOG_BAUD (
         set "SERIAL_BAUD=%SERIAL_LOG_BAUD%"
     ) else (
-        set "SERIAL_BAUD=115200"
+        set "SERIAL_BAUD=9600"
     )
 ) else (
     set "SERIAL_BAUD=%~2"

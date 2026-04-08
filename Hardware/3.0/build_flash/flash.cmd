@@ -337,7 +337,7 @@ echo [完成] 烧录结束。
 
 if defined SERIAL_LOG_PORT (
     echo [info] starting serial capture on !SERIAL_LOG_PORT! ...
-    if not defined SERIAL_LOG_BAUD set "SERIAL_LOG_BAUD=115200"
+    if not defined SERIAL_LOG_BAUD set "SERIAL_LOG_BAUD=9600"
     call "%SCRIPT_DIR%log_serial.cmd" "!SERIAL_LOG_PORT!" "!SERIAL_LOG_BAUD!"
     exit /b %ERRORLEVEL%
 )

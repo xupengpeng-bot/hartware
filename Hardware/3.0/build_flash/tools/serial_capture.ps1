@@ -1,6 +1,6 @@
 param(
     [string]$Port,
-    [int]$Baud = 115200,
+    [int]$Baud = 9600,
     [string]$OutputDir = "",
     [string]$SessionName = "",
     [int]$ReadTimeoutMs = 200,

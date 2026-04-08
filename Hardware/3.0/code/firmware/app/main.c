@@ -7,7 +7,7 @@
 int main(void)
 {
     bsp_uart_debug_init();
-    /* PA2=USART2_TX 与 CN4=PC12 软串口同时发；无数据时请确认 0x08000000 有 bootloader、0x08010000 有 APP */
+    /* Debug logs are emitted on CN4=TX5(PC12) through UART5. */
     bsp_debug_log("\r\n\r\n=== APP main() entry ===\r\n");
 
     {

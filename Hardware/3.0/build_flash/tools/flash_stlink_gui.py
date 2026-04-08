@@ -110,17 +110,17 @@ def _new_gui_log_path() -> str:
     return os.path.join(_logs_dir(), f"flash_gui_{stamp}.log")
 
 
-def _bytes_to_debug_text(data: bytes) -> str:
+def _bytes_to_debug_text(data: bytes, keep_newlines: bool = True) -> str:
     parts = []
     for b in data:
         if 0x20 <= b <= 0x7E:
             parts.append(chr(b))
         elif b == 0x0D:
-            parts.append("\\r")
+            parts.append("\r" if keep_newlines else "\\r")
         elif b == 0x0A:
-            parts.append("\\n")
+            parts.append("\n" if keep_newlines else "\\n")
         elif b == 0x09:
-            parts.append("\\t")
+            parts.append("\t" if keep_newlines else "\\t")
         else:
             parts.append(f"<{b:02X}>")
     return "".join(parts)
@@ -319,7 +319,7 @@ class FlashApp(tk.Tk):
         self.combo_com.pack(side=tk.LEFT, padx=(4, 8))
         ttk.Button(rs0, text="刷新 COM", command=self._refresh_com_ports).pack(side=tk.LEFT)
         ttk.Label(rs0, text="波特率:").pack(side=tk.LEFT, padx=(12, 4))
-        self.var_baud = tk.StringVar(value="115200")
+        self.var_baud = tk.StringVar(value="9600")
         ttk.Entry(rs0, textvariable=self.var_baud, width=8).pack(side=tk.LEFT)
         self.var_auto_serial = tk.BooleanVar(value=True)
         ttk.Checkbutton(
@@ -400,6 +400,8 @@ class FlashApp(tk.Tk):
             "需要 STM32CubeProgrammer 时请设置 USE_STM32_CUBE_CLI=1。\n"
             "「编译」在 build_flash 目录执行 build.cmd；「编译·烧录·串口」会编译、烧录，"
             "若勾选「烧录成功后自动读串口」则在烧录成功后打开当前端口读日志（需 pip install pyserial）。\n"
+            f"GUI 运行日志保存到: {self._gui_log_path}\n"
+            f"串口日志目录: {_logs_dir()}（开始读串口后会生成 .txt / .hex.txt / .raw.bin）\n"
         )
         if not self._cli_path and not self._stflash_path:
             self._log(
@@ -640,13 +642,32 @@ class FlashApp(tk.Tk):
             messagebox.showerror("错误", "请选择或输入串口（如 COM3）。")
             return
         try:
-            baud = int(self.var_baud.get().strip() or "115200")
+            baud = int(self.var_baud.get().strip() or "9600")
             if baud <= 0:
                 raise ValueError("波特率须为正整数")
         except ValueError as e:
             messagebox.showerror("错误", f"波特率无效: {e}")
             return
         self._log(f"\n[串口] 打开 {port}，波特率 {baud}\n")
+        self._close_serial_log_files()
+        self._serial_text_path, self._serial_hex_path, self._serial_raw_path = _new_serial_log_paths(port)
+        self._serial_text_fp = open(self._serial_text_path, "w", encoding="utf-8", newline="")
+        self._serial_hex_fp = open(self._serial_hex_path, "w", encoding="utf-8", newline="")
+        self._serial_raw_fp = open(self._serial_raw_path, "wb")
+        self._serial_hex_offset = 0
+        self._serial_text_fp.write("=== gui serial capture started ===\n")
+        self._serial_text_fp.write(f"port={port}\n")
+        self._serial_text_fp.write(f"baud={baud}\n")
+        self._serial_text_fp.write(f"local_time={time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+        self._serial_text_fp.flush()
+        self._serial_hex_fp.write("=== gui serial hex capture started ===\n")
+        self._serial_hex_fp.write(f"port={port}\n")
+        self._serial_hex_fp.write(f"baud={baud}\n")
+        self._serial_hex_fp.write(f"local_time={time.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        self._serial_hex_fp.flush()
+        self._log(f"[serial] text log: {self._serial_text_path}\n")
+        self._log(f"[serial] hex log : {self._serial_hex_path}\n")
+        self._log(f"[serial] raw log : {self._serial_raw_path}\n")
         t = threading.Thread(target=lambda: self._serial_worker(port, baud), daemon=True)
         self._serial_thread = t
         t.start()
