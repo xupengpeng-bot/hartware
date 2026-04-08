@@ -1,14 +1,4 @@
-# Monorepo (origin/main)
-.DS_Store
-Thumbs.db
-Desktop.ini
-*.log
-*.tmp
-*.bak
-.vscode/
-.idea/
-
-# Hardware/3.0 embedded — build outputs
+# Build outputs
 **/build/
 **/out/
 **/CMakeFiles/
@@ -26,7 +16,7 @@ Desktop.ini
 **/__pycache__/
 **/*.pyc
 
-# IDE / OS (extra)
+# IDE / OS
 **/.vs/
 **/Thumbs.db
 

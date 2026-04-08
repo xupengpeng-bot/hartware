@@ -1,0 +1,49 @@
+# Role Init README
+
+Status: active
+Audience: PM, AI agents
+Purpose: provide short role-specific initialization cards so new AI threads can start with the right task source, scope, and stop conditions.
+
+## Use rule
+
+When opening a new AI thread, PM should provide:
+
+1. the role-init card for the intended role
+2. the current task file or `CURRENT.md`
+3. the relevant business requirement source when the task is not yet pure execution
+
+On a brand-new machine with no local workspace yet:
+
+1. complete Git bootstrap first
+2. fetch DB bootstrap when dispatch DB is active
+3. then open the role-init card
+
+Bootstrap entry:
+
+- `docs/codex/REMOTE-FIRST-BOOTSTRAP.md`
+
+## Available role-init cards
+
+- `role-init/delivery_orchestrator.md`
+- `role-init/requirements_engineer.md`
+- `role-init/feature_research_engineer.md`
+- `role-init/software_engineer.md`
+- `role-init/uat_engineer.md`
+- `role-init/marketing_strategy_engineer.md`
+- `role-init/development_system_engineer.md`
+- `role-init/embedded_engineer.md`
+- `role-init/hardware_engineer.md`
+
+## If the domain is unclear
+
+Read:
+
+- `DOMAIN-NAVIGATION.md`
+
+before guessing which role should own the work.
+
+## Shared rule
+
+- `CURRENT.md` is still the live dispatch entry for software-engineer execution.
+- Role-init cards help a new thread understand how to read, where to start, and when to stop.
+- If a role-init card conflicts with `CURRENT.md` or a PM-frozen task sheet, the explicit live task file wins.
