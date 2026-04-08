@@ -21,7 +21,6 @@ static uint8_t             s_register_pending;
 
 static char    s_nc_json[4096];
 static char    s_nc_reply[4096];
-/* 与 PR 合并后 RAM 余量约 48KB；register JSON 缓冲略减以通过链接 */
 static char    s_nc_register[1968];
 static uint8_t s_nc_wire[8192];
 
