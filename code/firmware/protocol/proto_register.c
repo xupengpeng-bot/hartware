@@ -14,6 +14,11 @@ static int append_json_kv_u32(json_buf_t *jb, const char *k, uint32_t v)
     return json_buf_append(jb, tmp);
 }
 
+static int require_nonempty_field(const char *value)
+{
+    return (value != NULL && value[0] != '\0') ? 0 : -1;
+}
+
 int proto_register_build(char *buf, size_t cap)
 {
     if (!buf || cap < 512U) {
@@ -30,6 +35,12 @@ int proto_register_build(char *buf, size_t cap)
     memset(&fm, 0, sizeof(fm));
     if (storage_config_load(&cfg) == 0) {
         fm = cfg.feature_modules;
+    }
+
+    if (require_nonempty_field(id->iccid) != 0 || require_nonempty_field(id->imei) != 0 ||
+        require_nonempty_field(id->hardware_sku) != 0 || require_nonempty_field(id->hardware_rev) != 0 ||
+        require_nonempty_field(id->firmware_family) != 0 || require_nonempty_field(id->firmware_version) != 0) {
+        return -3;
     }
 
     json_buf_t jb;

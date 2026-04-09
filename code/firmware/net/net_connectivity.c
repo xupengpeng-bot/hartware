@@ -23,6 +23,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
 
 static net_socket_client_t s_sock;
 static uint32_t            s_last_connect_attempt_ms;
@@ -37,6 +38,115 @@ static uint8_t s_nc_wire[8192];
 
 #define NET_RECONNECT_BACKOFF_MS 5000U
 #define NET_REGISTER_RETRY_MS    10000U
+
+static int net_json_validate_complete_object(const char *json, size_t len)
+{
+    size_t start = 0U;
+    size_t end = len;
+    size_t i;
+    int brace_depth = 0;
+    int bracket_depth = 0;
+    int in_string = 0;
+    int escape = 0;
+
+    if (json == NULL || len == 0U) {
+        return -1;
+    }
+
+    while (start < len && isspace((unsigned char)json[start])) {
+        start++;
+    }
+    while (end > start && isspace((unsigned char)json[end - 1U])) {
+        end--;
+    }
+    if (start >= end || json[start] != '{' || json[end - 1U] != '}') {
+        return -2;
+    }
+
+    for (i = start; i < end; i++) {
+        unsigned char ch = (unsigned char)json[i];
+        if (in_string) {
+            if (escape) {
+                escape = 0;
+                continue;
+            }
+            if (ch == '\\') {
+                escape = 1;
+                continue;
+            }
+            if (ch == '"') {
+                in_string = 0;
+            }
+            continue;
+        }
+
+        if (ch == '"') {
+            in_string = 1;
+        } else if (ch == '{') {
+            brace_depth++;
+        } else if (ch == '}') {
+            brace_depth--;
+            if (brace_depth < 0) {
+                return -3;
+            }
+        } else if (ch == '[') {
+            bracket_depth++;
+        } else if (ch == ']') {
+            bracket_depth--;
+            if (bracket_depth < 0) {
+                return -4;
+            }
+        }
+    }
+
+    if (in_string || escape) {
+        return -5;
+    }
+    if (brace_depth != 0 || bracket_depth != 0) {
+        return -6;
+    }
+    return 0;
+}
+
+static int net_json_require_nonempty_string(const char *json, const char *key)
+{
+    char tmp[96];
+    if (proto_json_get_string(json, key, tmp, sizeof(tmp)) != 0) {
+        return -1;
+    }
+    return tmp[0] == '\0' ? -2 : 0;
+}
+
+static int net_json_validate_business_frame(const char *json, size_t len)
+{
+    uint32_t seq = 0U;
+
+    if (net_json_validate_complete_object(json, len) != 0) {
+        return -1;
+    }
+    if (net_json_require_nonempty_string(json, "protocol") != 0) {
+        return -2;
+    }
+    if (net_json_require_nonempty_string(json, "type") != 0) {
+        return -3;
+    }
+    if (net_json_require_nonempty_string(json, "imei") != 0) {
+        return -4;
+    }
+    if (net_json_require_nonempty_string(json, "msg_id") != 0) {
+        return -5;
+    }
+    if (net_json_require_nonempty_string(json, "ts") != 0) {
+        return -6;
+    }
+    if (proto_json_get_u32(json, "seq", &seq) != 0) {
+        return -7;
+    }
+    if (strstr(json, "\"payload\"") == NULL) {
+        return -8;
+    }
+    return 0;
+}
 
 static void net_log_json_short(const char *tag, const char *json, size_t len)
 {
@@ -272,10 +382,20 @@ int net_connectivity_send_json(const char *json_body, size_t json_len)
     if (!json_body || json_len == 0U) {
         return -1;
     }
+    {
+        int v = net_json_validate_business_frame(json_body, json_len);
+        if (v != 0) {
+            char line[96];
+            (void)snprintf(line, sizeof(line), "[NET] tx-json blocked: invalid business json rc=%d\r\n", v);
+            bsp_debug_log(line);
+            net_log_json_short("tx-json-invalid", json_body, json_len);
+            return -2;
+        }
+    }
     net_log_json_short("tx-json", json_body, json_len);
     int w = proto_envelope_encode(json_body, json_len, s_nc_wire, sizeof(s_nc_wire));
     if (w < 0) {
-        return -2;
+        return -3;
     }
     {
         char line[96];
@@ -285,7 +405,7 @@ int net_connectivity_send_json(const char *json_body, size_t json_len)
         bsp_debug_log(line);
     }
     if (s_sock.connected == 0) {
-        return -3;
+        return -4;
     }
     return net_socket_client_send(&s_sock, s_nc_wire, (size_t)w);
 }
