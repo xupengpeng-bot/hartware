@@ -43,12 +43,13 @@ static void send_vitals_mark_baseline(uint32_t monotonic_ms)
 {
     int n = proto_heartbeat_build_vitals(s_sched_vitals, sizeof(s_sched_vitals));
     if (n > 0) {
-        (void)net_connectivity_send_json(s_sched_vitals, (size_t)n);
-        const common_status_t *st = common_status_get();
-        s_last_sent_csq       = st->signal_csq;
-        s_last_sent_soc       = st->battery_soc;
-        s_vitals_baseline_ok  = 1U;
-        s_last_vitals         = monotonic_ms;
+        if (net_connectivity_send_json(s_sched_vitals, (size_t)n) >= 0) {
+            const common_status_t *st = common_status_get();
+            s_last_sent_csq       = st->signal_csq;
+            s_last_sent_soc       = st->battery_soc;
+            s_vitals_baseline_ok  = 1U;
+            s_last_vitals         = monotonic_ms;
+        }
     }
 }
 
@@ -131,6 +132,11 @@ void app_scheduler_tick(uint32_t monotonic_ms)
     }
 
     const runtime_rules_t *rr = &cfg2.runtime_rules;
+    const common_status_t *st = common_status_get();
+
+    if (!st->registered_once) {
+        return;
+    }
 
     if (rr->snapshot_interval_sec > 0U) {
         uint32_t iv_snap = (uint32_t)rr->snapshot_interval_sec * 1000U;

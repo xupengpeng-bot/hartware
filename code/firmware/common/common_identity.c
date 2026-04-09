@@ -8,6 +8,8 @@ void common_identity_init(void)
 {
     memset(&s_id, 0, sizeof(s_id));
     memset(&s_res, 0, sizeof(s_res));
+    (void)strncpy(s_id.imei, "861295087573980", sizeof(s_id.imei) - 1U);
+    (void)strncpy(s_id.iccid, "898604B72622C0311625", sizeof(s_id.iccid) - 1U);
     (void)strncpy(s_id.firmware_family, "FW_H2_UNIFIED", sizeof(s_id.firmware_family) - 1U);
     (void)strncpy(s_id.firmware_version, "0.0.1", sizeof(s_id.firmware_version) - 1U);
     (void)strncpy(s_id.hardware_sku, "CTRL_UNIFIED", sizeof(s_id.hardware_sku) - 1U);

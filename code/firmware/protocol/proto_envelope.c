@@ -86,21 +86,19 @@ static int append_optional_string_field(json_buf_t *jb, const char *key, const c
     return 0;
 }
 
-static int append_optional_ts(json_buf_t *jb)
+static int append_mandatory_ts(json_buf_t *jb)
 {
     uint32_t unix_sec = 0U;
-    if (bsp_rtc_get_unix(&unix_sec) != 0 || unix_sec == 0U) {
-        return 0;
-    }
-    time_t raw = (time_t)unix_sec;
-    struct tm *tm_utc = gmtime(&raw);
-    if (!tm_utc) {
-        return 0;
-    }
     char ts[32];
-    if (strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%SZ", tm_utc) == 0U) {
-        return 0;
+    if (bsp_rtc_get_unix(&unix_sec) == 0 && unix_sec != 0U) {
+        time_t raw = (time_t)unix_sec;
+        struct tm *tm_utc = gmtime(&raw);
+        if (tm_utc != NULL && strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%SZ", tm_utc) != 0U) {
+            return append_optional_string_field(jb, "ts", ts);
+        }
     }
+    (void)strncpy(ts, "1970-01-01T00:00:00Z", sizeof(ts) - 1U);
+    ts[sizeof(ts) - 1U] = '\0';
     return append_optional_string_field(jb, "ts", ts);
 }
 
@@ -136,7 +134,7 @@ int proto_envelope_append_payload_prefix(json_buf_t *jb, const char *msg_type, u
     if (json_buf_append_fmt(jb, "\",\"seq\":%lu", (unsigned long)seq) != 0) {
         return -1;
     }
-    if (append_optional_ts(jb) != 0) {
+    if (append_mandatory_ts(jb) != 0) {
         return -1;
     }
     if (append_optional_string_field(jb, "correlation_id", correlation_id) != 0) {

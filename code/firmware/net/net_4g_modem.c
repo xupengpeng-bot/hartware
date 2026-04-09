@@ -58,9 +58,11 @@ static size_t   s_tcp_head;
 static size_t   s_tcp_tail;
 static int      s_online;
 static int      s_tcp_connected;
-static int      s_tcp_direct_mode;
 
 static void tcp_fifo_push(const uint8_t *p, size_t n);
+static void modem_log_at_tx(const char *cmd);
+static void modem_log_tcp_tx(const uint8_t *data, size_t len);
+static void modem_log_tcp_rx(const uint8_t *data, size_t len);
 
 static void modem_power_gpio_init(void)
 {
@@ -210,10 +212,6 @@ static void stream_push_from_uart(void)
 {
     uint8_t ch;
     while (bsp_uart_read((int)BOARD_HW_UART_PORT_MODEM_4G, &ch, 1U) > 0) {
-        if (s_tcp_connected != 0 && s_tcp_direct_mode != 0) {
-            tcp_fifo_push(&ch, 1U);
-            continue;
-        }
         if (s_rx_len < MODEM_STREAM_CAP) {
             s_rx_stream[s_rx_len++] = ch;
         } else {
@@ -331,8 +329,83 @@ static int modem_write_str(const char *s)
     if (s == NULL) {
         return -1;
     }
+    modem_log_at_tx(s);
     size_t len = strlen(s);
     return bsp_uart_write((int)BOARD_HW_UART_PORT_MODEM_4G, (const uint8_t *)s, len);
+}
+
+static void modem_log_at_tx(const char *cmd)
+{
+    char line[160];
+    size_t len;
+
+    if (cmd == NULL) {
+        return;
+    }
+    len = strcspn(cmd, "\r\n");
+    if (len > 96U) {
+        len = 96U;
+    }
+    (void)snprintf(line, sizeof(line), "[4G][AT->MODEM] %.*s\r\n", (int)len, cmd);
+    bsp_debug_log(line);
+}
+
+static void modem_log_tcp_tx(const uint8_t *data, size_t len)
+{
+    char line[220];
+    uint32_t be_len = 0U;
+    size_t json_len;
+
+    if (data == NULL || len == 0U) {
+        return;
+    }
+    if (len >= 4U) {
+        be_len = ((uint32_t)data[0] << 24) | ((uint32_t)data[1] << 16) |
+                 ((uint32_t)data[2] << 8) | (uint32_t)data[3];
+        json_len = len - 4U;
+        if (json_len > 120U) {
+            json_len = 120U;
+        }
+        (void)snprintf(line, sizeof(line),
+                       "[4G][TCP->PLAT] frame_len=%lu prefix=%lu json=%.*s%s\r\n",
+                       (unsigned long)len,
+                       (unsigned long)be_len,
+                       (int)json_len,
+                       (const char *)(data + 4U),
+                       (len - 4U) > json_len ? "..." : "");
+    } else {
+        (void)snprintf(line, sizeof(line), "[4G][TCP->PLAT] short frame len=%lu\r\n", (unsigned long)len);
+    }
+    bsp_debug_log(line);
+}
+
+static void modem_log_tcp_rx(const uint8_t *data, size_t len)
+{
+    char line[220];
+    uint32_t be_len = 0U;
+    size_t json_len;
+
+    if (data == NULL || len == 0U) {
+        return;
+    }
+    if (len >= 4U) {
+        be_len = ((uint32_t)data[0] << 24) | ((uint32_t)data[1] << 16) |
+                 ((uint32_t)data[2] << 8) | (uint32_t)data[3];
+        json_len = len - 4U;
+        if (json_len > 120U) {
+            json_len = 120U;
+        }
+        (void)snprintf(line, sizeof(line),
+                       "[4G][TCP<-PLAT] frame_len=%lu prefix=%lu json=%.*s%s\r\n",
+                       (unsigned long)len,
+                       (unsigned long)be_len,
+                       (int)json_len,
+                       (const char *)(data + 4U),
+                       (len - 4U) > json_len ? "..." : "");
+    } else {
+        (void)snprintf(line, sizeof(line), "[4G][TCP<-PLAT] short frame len=%lu\r\n", (unsigned long)len);
+    }
+    bsp_debug_log(line);
 }
 
 static int modem_wait_substr(const char *needle, uint32_t timeout_ms)
@@ -549,6 +622,7 @@ static int modem_qird_fetch(unsigned request_len)
                 tmp[i] = (uint8_t)ch;
             }
             tcp_fifo_push(tmp, (size_t)chunk);
+            modem_log_tcp_rx(tmp, (size_t)chunk);
             remain -= chunk;
         }
     }
@@ -741,7 +815,6 @@ void net_4g_modem_init(void)
 {
     s_online = 0;
     s_tcp_connected = 0;
-    s_tcp_direct_mode = 0;
     s_rx_len = 0U;
     s_tcp_head = 0U;
     s_tcp_tail = 0U;
@@ -902,7 +975,7 @@ int net_4g_modem_tcp_connect(const char *host, uint16_t port)
     {
         char cmd[180];
         /* 与参考「机井3.0一体机带lora(老曹改后)…network_task.c」EC_QIOPEN 一致：local_port=0, access_mode=2 */
-        int  n = snprintf(cmd, sizeof(cmd), "AT+QIOPEN=1,%u,\"TCP\",\"%s\",%u,0,2\r\n", TCP_CONNECT_ID, host, (unsigned)port);
+        int  n = snprintf(cmd, sizeof(cmd), "AT+QIOPEN=1,%u,\"TCP\",\"%s\",%u,0,0\r\n", TCP_CONNECT_ID, host, (unsigned)port);
         if (n <= 0 || (size_t)n >= sizeof(cmd)) {
             bsp_debug_log("[4G] TCP [4/4] FAIL: host too long for AT cmd\r\n");
             return -1;
@@ -921,9 +994,8 @@ int net_4g_modem_tcp_connect(const char *host, uint16_t port)
     }
 
     s_tcp_connected = 1;
-    s_tcp_direct_mode = 1;
     bsp_debug_log("[4G] TCP [4/4] OK: socket open, data path ready\r\n");
-    bsp_debug_log("[4G] TCP mode: direct UART payload (legacy access_mode=2)\r\n");
+    bsp_debug_log("[4G] TCP mode: AT control + QISEND/QIRD data plane\r\n");
     return 0;
 #endif
 }
@@ -932,7 +1004,6 @@ void net_4g_modem_tcp_close(void)
 {
 #if defined(BOARD_STM32F103)
     s_tcp_connected = 0;
-    s_tcp_direct_mode = 0;
     modem_drain_hw_rx();
     s_rx_len = 0U;
     (void)modem_at_simple_ok("AT+QICLOSE=0\r\n", 8000U);
@@ -954,41 +1025,33 @@ int net_4g_modem_tcp_send(const uint8_t *data, size_t len)
         len = 1460U;
     }
 
-    if (s_tcp_direct_mode != 0) {
-        int w = bsp_uart_write((int)BOARD_HW_UART_PORT_MODEM_4G, data, len);
-        if (w != (int)len) {
-            bsp_debug_log("[4G] TCP: direct write failed\r\n");
-            return -1;
-        }
-        return w;
-    }
-
     {
         char hdr[48];
 
-    modem_drain_hw_rx();
-    s_rx_len = 0U;
+        modem_drain_hw_rx();
+        s_rx_len = 0U;
 
-    (void)snprintf(hdr, sizeof(hdr), "AT+QISEND=%u,%u\r\n", TCP_CONNECT_ID, (unsigned)len);
-    if (modem_write_str(hdr) < 0) {
-        return -1;
-    }
-
-    if (modem_wait_substr(">", 5000U) != 0) {
-        bsp_debug_log("[4G] TCP: QISEND no prompt\r\n");
-        return -1;
-    }
-
-    if (bsp_uart_write((int)BOARD_HW_UART_PORT_MODEM_4G, data, len) != (int)len) {
-        return -1;
-    }
-
-    if (modem_wait_substr("SEND OK", 15000U) != 0) {
-        if (modem_wait_line_ok_or_err(3000U) != 0) {
-            bsp_debug_log("[4G] TCP: QISEND failed\r\n");
+        (void)snprintf(hdr, sizeof(hdr), "AT+QISEND=%u,%u\r\n", TCP_CONNECT_ID, (unsigned)len);
+        if (modem_write_str(hdr) < 0) {
             return -1;
         }
-    }
+
+        if (modem_wait_substr(">", 5000U) != 0) {
+            bsp_debug_log("[4G] TCP: QISEND no prompt\r\n");
+            return -1;
+        }
+
+        modem_log_tcp_tx(data, len);
+        if (bsp_uart_write((int)BOARD_HW_UART_PORT_MODEM_4G, data, len) != (int)len) {
+            return -1;
+        }
+
+        if (modem_wait_substr("SEND OK", 15000U) != 0) {
+            if (modem_wait_line_ok_or_err(3000U) != 0) {
+                bsp_debug_log("[4G] TCP: QISEND failed\r\n");
+                return -1;
+            }
+        }
     }
 
     return (int)len;

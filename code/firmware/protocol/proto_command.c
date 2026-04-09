@@ -59,6 +59,9 @@ int proto_build_command_nack(char *buf, size_t cap, const char *correlation_id, 
             return -2;
         }
     }
+    if (json_buf_append(&jb, "\"") != 0) {
+        return -2;
+    }
     if (proto_envelope_close_payload(&jb) != 0) {
         return -2;
     }
