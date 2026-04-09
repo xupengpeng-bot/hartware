@@ -127,13 +127,22 @@ def _bytes_to_debug_text(data: bytes, keep_newlines: bool = True) -> str:
 
 
 def _default_bin() -> str:
-    # 与 build.cmd 默认 BUILD_DIR 一致（避免中文工程路径时 CMake 失败，产物在 LOCALAPPDATA）
+    # 优先选择“最新生成”的 controller_fw.bin，避免 GUI 误用陈旧产物。
+    candidates = []
     la = os.environ.get("LOCALAPPDATA")
     if la:
-        cand = os.path.join(la, "hw_embedded_build", "out", "build", "controller_fw.bin")
-        if os.path.isfile(cand):
-            return cand
-    return os.path.join(_build_flash_dir(), "out", "build", "controller_fw.bin")
+        candidates.extend(
+            [
+                os.path.join(la, "hw_embedded_build", "verify_netdiag", "controller_fw.bin"),
+                os.path.join(la, "hw_embedded_build", "out", "build", "controller_fw.bin"),
+            ]
+        )
+    candidates.append(os.path.join(_build_flash_dir(), "out", "build", "controller_fw.bin"))
+
+    existing = [p for p in candidates if os.path.isfile(p)]
+    if existing:
+        return max(existing, key=os.path.getmtime)
+    return candidates[0] if candidates else os.path.join(_build_flash_dir(), "out", "build", "controller_fw.bin")
 
 
 def find_stm32_programmer_cli() -> Optional[str]:

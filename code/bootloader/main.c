@@ -41,13 +41,15 @@ static void go_app(void)
 {
     uint32_t sp = rd32(APP_VECTORS);
     uint32_t pc = rd32(APP_VECTORS + 4u);
-    void (*reset)(void) = (void (*)(void))(pc & ~1u);
+    void (*reset)(void) = (void (*)(void))pc;
 
     __asm volatile("cpsid i" ::: "memory");
     SCB_VTOR = APP_VECTORS;
     __asm volatile("dsb" ::: "memory");
     __asm volatile("isb" ::: "memory");
     set_msp(sp);
+    /* Reset leaves interrupts enabled; restore that contract before entering the APP. */
+    __asm volatile("cpsie i" ::: "memory");
     reset();
 }
 

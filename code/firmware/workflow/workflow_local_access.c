@@ -4,7 +4,6 @@
 #include "workflow_voice.h"
 #include "common_status.h"
 #include "app_context.h"
-#include "net_connectivity.h"
 #include "proto_event_report.h"
 
 #include <stdio.h>
@@ -126,28 +125,20 @@ static void workflow_local_access_emit_event(const char *event_code,
 {
     char safe_source[WORKFLOW_LOCAL_ACCESS_SOURCE_LEN];
     char safe_reason[WORKFLOW_LOCAL_ACCESS_REASON_LEN];
-    char payload[320];
-    char event[640];
-    int  built;
 
     workflow_local_access_copy_symbol(safe_source, sizeof(safe_source), source_code);
     workflow_local_access_copy_symbol(safe_reason, sizeof(safe_reason), reason);
-    (void)snprintf(payload, sizeof(payload),
-                   "\"access_source\":\"%s\","
-                   "\"access_reason\":\"%s\","
-                   "\"idempotent\":%s,"
-                   "\"active_token_bound\":%s,"
-                   "\"workflow_state\":\"%s\"",
-                   safe_source[0] != '\0' ? safe_source : "local_token",
-                   safe_reason,
-                   idempotent ? "true" : "false",
-                   workflow_local_access_has_active_token() ? "true" : "false",
-                   workflow_control_state_label(workflow_engine_get_state()));
-
-    built = proto_event_report_build(event, sizeof(event), session_ref, event_code, payload);
-    if (built > 0) {
-        (void)net_connectivity_send_json(event, (size_t)built);
-    }
+    (void)proto_event_report_sendf(session_ref, event_code,
+                                   "\"access_source\":\"%s\","
+                                   "\"access_reason\":\"%s\","
+                                   "\"idempotent\":%s,"
+                                   "\"active_token_bound\":%s,"
+                                   "\"workflow_state\":\"%s\"",
+                                   safe_source[0] != '\0' ? safe_source : "local_token",
+                                   safe_reason,
+                                   idempotent ? "true" : "false",
+                                   workflow_local_access_has_active_token() ? "true" : "false",
+                                   workflow_control_state_label(workflow_engine_get_state()));
 }
 
 static void workflow_local_access_emit_voice_prompt(workflow_local_access_decision_t decision)

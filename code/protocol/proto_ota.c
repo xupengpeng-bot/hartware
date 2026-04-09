@@ -26,6 +26,24 @@ static uint8_t        s_dl_progress_reported;
 static void          *s_sha_ctx;
 static uint8_t        s_chunk[OTA_CHUNK_BYTES];
 
+static void ota_copy_cstr(char *dst, size_t cap, const char *src)
+{
+    size_t i = 0U;
+
+    if (dst == NULL || cap == 0U) {
+        return;
+    }
+    if (src == NULL) {
+        dst[0] = '\0';
+        return;
+    }
+    while (i + 1U < cap && src[i] != '\0') {
+        dst[i] = src[i];
+        i++;
+    }
+    dst[i] = '\0';
+}
+
 static void persist_progress(void)
 {
     uint8_t dlp = 0;
@@ -47,8 +65,7 @@ static void set_error(int32_t code, const char *msg)
 {
     s_last_error_code = code;
     if (msg) {
-        strncpy(s_last_error_message, msg, sizeof(s_last_error_message) - 1U);
-        s_last_error_message[sizeof(s_last_error_message) - 1U] = '\0';
+        ota_copy_cstr(s_last_error_message, sizeof(s_last_error_message), msg);
     } else {
         s_last_error_message[0] = '\0';
     }
@@ -205,9 +222,7 @@ void proto_ota_init(const ota_port_t *port, const char *current_firmware_version
     if (capability) {
         s_cap = *capability;
     }
-    strncpy(s_current_version, current_firmware_version ? current_firmware_version : "",
-            sizeof(s_current_version) - 1U);
-    s_current_version[sizeof(s_current_version) - 1U] = '\0';
+    ota_copy_cstr(s_current_version, sizeof(s_current_version), current_firmware_version);
 
     s_state = OTA_STATE_IDLE;
     s_last_result = OTA_LAST_RESULT_NONE;
@@ -222,8 +237,7 @@ void proto_ota_init(const ota_port_t *port, const char *current_firmware_version
 
 void proto_ota_set_current_version(const char *version)
 {
-    strncpy(s_current_version, version ? version : "", sizeof(s_current_version) - 1U);
-    s_current_version[sizeof(s_current_version) - 1U] = '\0';
+    ota_copy_cstr(s_current_version, sizeof(s_current_version), version);
 }
 
 void proto_ota_report_upgrade_succeeded_after_boot(void)
@@ -377,14 +391,14 @@ int proto_ota_query_upgrade_status(ota_upgrade_status_t *out)
     }
     memset(out, 0, sizeof(*out));
     out->ota_state = s_state;
-    strncpy(out->current_version, s_current_version, sizeof(out->current_version) - 1U);
+    ota_copy_cstr(out->current_version, sizeof(out->current_version), s_current_version);
     out->last_result = s_last_result;
     out->last_error_code = s_last_error_code;
-    strncpy(out->last_error_message, s_last_error_message, sizeof(out->last_error_message) - 1U);
+    ota_copy_cstr(out->last_error_message, sizeof(out->last_error_message), s_last_error_message);
     ota_prepare_payload_t m;
     if (storage_upgrade_load_manifest(&m) == 0) {
-        strncpy(out->target_version, m.target_version, sizeof(out->target_version) - 1U);
-        strncpy(out->package_sha256_hex, m.package_sha256_hex, sizeof(out->package_sha256_hex) - 1U);
+        ota_copy_cstr(out->target_version, sizeof(out->target_version), m.target_version);
+        ota_copy_cstr(out->package_sha256_hex, sizeof(out->package_sha256_hex), m.package_sha256_hex);
     }
     if (s_state == OTA_STATE_DOWNLOADING && m.package_size > 0U) {
         out->download_progress_pct =

@@ -5,9 +5,10 @@
 #include <stdint.h>
 
 #define NET_SOCKET_CLIENT_HOST_MAX 96U
+#define NET_SOCKET_CLIENT_RX_MAX   4608U
 
 typedef struct {
-    uint8_t  rx[8192];
+    uint8_t  rx[NET_SOCKET_CLIENT_RX_MAX];
     size_t   rx_len;
     int      connected;
     uint8_t  socket_id;

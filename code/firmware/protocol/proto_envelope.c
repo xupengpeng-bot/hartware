@@ -3,7 +3,6 @@
 #include "common_identity.h"
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 static uint32_t s_proto_seq = 0U;
 
@@ -48,7 +47,7 @@ int proto_envelope_encode(const char *json_body, size_t json_len, uint8_t *out, 
     return (int)(PROTO_LENGTH_PREFIX_BYTES + json_len);
 }
 
-static uint32_t proto_envelope_take_seq(uint32_t seq_no)
+uint32_t proto_envelope_take_seq_no(uint32_t seq_no)
 {
     if (seq_no != 0U) {
         if (seq_no > s_proto_seq) {
@@ -88,17 +87,14 @@ static int append_optional_string_field(json_buf_t *jb, const char *key, const c
 
 static int append_mandatory_ts(json_buf_t *jb)
 {
-    uint32_t unix_sec = 0U;
     char ts[32];
-    if (bsp_rtc_get_unix(&unix_sec) == 0 && unix_sec != 0U) {
-        time_t raw = (time_t)unix_sec;
-        struct tm *tm_utc = gmtime(&raw);
-        if (tm_utc != NULL && strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%SZ", tm_utc) != 0U) {
-            return append_optional_string_field(jb, "ts", ts);
-        }
+    if (bsp_rtc_now_iso8601(ts, sizeof(ts), NULL) == 0) {
+        return append_optional_string_field(jb, "ts", ts);
     }
-    (void)strncpy(ts, "1970-01-01T00:00:00Z", sizeof(ts) - 1U);
-    ts[sizeof(ts) - 1U] = '\0';
+    if (bsp_rtc_format_iso8601(ts, sizeof(ts), 0U, bsp_rtc_configured_timezone_qh()) != 0) {
+        (void)strncpy(ts, "1970-01-01T08:00:00+08:00", sizeof(ts) - 1U);
+        ts[sizeof(ts) - 1U] = '\0';
+    }
     return append_optional_string_field(jb, "ts", ts);
 }
 
@@ -110,7 +106,7 @@ int proto_envelope_append_payload_prefix(json_buf_t *jb, const char *msg_type, u
     }
     const controller_identity_t *id = common_identity_get();
     const char *imei = (id && id->imei[0] != '\0') ? id->imei : "";
-    uint32_t seq = proto_envelope_take_seq(seq_no);
+    uint32_t seq = proto_envelope_take_seq_no(seq_no);
     char msg_id[96];
     (void)snprintf(msg_id, sizeof(msg_id), "%s-%lu", imei[0] != '\0' ? imei : "device", (unsigned long)seq);
     if (json_buf_append(jb, "{\"protocol\":\"" PROTO_PROTOCOL_NAME "\",\"type\":\"") != 0) {

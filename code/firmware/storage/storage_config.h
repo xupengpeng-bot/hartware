@@ -23,4 +23,10 @@ bool storage_config_has_valid(void);
 
 uint8_t storage_config_active_slot(void);
 
+/** Return active config pointer, or NULL when no valid config is staged. */
+const device_config_t *storage_config_active(void);
+
+/** Return inactive slot pointer cleared for in-place editing. */
+device_config_t *storage_config_inactive_mutable(void);
+
 #endif /* STORAGE_CONFIG_H */

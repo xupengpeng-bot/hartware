@@ -30,7 +30,9 @@ target_include_directories(controller_ota PUBLIC
 )
 
 add_library(controller_firmware STATIC
+    third_party/cjson/cJSON.c
     firmware/protocol/proto_envelope.c
+    firmware/protocol/proto_json_builder.c
     firmware/protocol/proto_dispatch.c
     firmware/protocol/proto_codec_json.c
     firmware/protocol/proto_command.c
@@ -88,6 +90,7 @@ if(FW_PLATFORM_CONFIG_DIR)
 endif()
 
 target_include_directories(controller_firmware PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cjson
     ${CMAKE_CURRENT_SOURCE_DIR}/firmware/model
     ${CMAKE_CURRENT_SOURCE_DIR}/firmware/protocol
     ${CMAKE_CURRENT_SOURCE_DIR}/firmware/storage
@@ -207,4 +210,3 @@ add_subdirectory(bootloader)
 
 # 不将 bootloader 设为 controller_fw 的依赖：日常只改 APP 时 `ninja controller_fw` 不会重编 bootloader。
 # 需 bootloader 产物时：单独构建 bootloader 目标，或使用 build_flash\build_all.cmd。
-

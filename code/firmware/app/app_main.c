@@ -74,9 +74,11 @@ static int cb_sync_config(const char *json, size_t len, char *reply, size_t repl
     }
     net_platform_config_reload_from_device_config();
     net_connectivity_force_reconnect();
-    device_config_t cfg;
-    if (storage_config_load(&cfg) == 0) {
-        common_status_set_config_version(cfg.config_version);
+    {
+        const device_config_t *cfg = storage_config_active();
+        if (cfg != NULL) {
+            common_status_set_config_version(cfg->config_version);
+        }
     }
     return proto_build_command_ack(reply, reply_cap, corr, session_ref[0] ? session_ref : NULL, extra);
 }
@@ -119,29 +121,31 @@ static const proto_dispatch_handlers_t s_proto_handlers = {
 
 static void app_seed_default_config(void)
 {
-    device_config_t cfg;
-    memset(&cfg, 0, sizeof(cfg));
-    cfg.config_version = 1U;
-    cfg.feature_modules.pump_vfd_control         = 1U;
-    cfg.feature_modules.pressure_acquisition     = 1U;
-    cfg.feature_modules.flow_acquisition         = 1U;
-    cfg.feature_modules.single_valve_control     = 1U;
-    cfg.feature_modules.electric_meter_modbus    = 1U;
-    cfg.feature_modules.soil_moisture_acquisition   = 1U;
-    cfg.feature_modules.soil_temperature_acquisition = 1U;
-    cfg.runtime_rules.heartbeat_interval_sec      = 0U;
-    cfg.runtime_rules.link_ping_interval_sec      = 120U;
-    cfg.runtime_rules.vitals_interval_sec         = 900U;
-    cfg.runtime_rules.vitals_csq_delta            = 5U;
-    cfg.runtime_rules.vitals_soc_delta            = 5U;
-    cfg.runtime_rules.snapshot_interval_sec       = 600U;
-    cfg.runtime_rules.runtime_tick_interval_sec = 1U;
-    cfg.runtime_rules.workflow_enabled          = 1U;
-    (void)strncpy(cfg.platform_tcp_host, FW_PLATFORM_TCP_HOST, sizeof(cfg.platform_tcp_host) - 1U);
-    cfg.platform_tcp_host[sizeof(cfg.platform_tcp_host) - 1U] = '\0';
-    cfg.platform_tcp_port                                     = FW_PLATFORM_TCP_PORT;
-    (void)storage_config_stage_inactive(&cfg);
-    (void)storage_config_commit_swap(cfg.config_version);
+    device_config_t *cfg = storage_config_inactive_mutable();
+    if (cfg == NULL) {
+        return;
+    }
+    cfg->config_version = 1U;
+    cfg->feature_modules.pump_vfd_control         = 1U;
+    cfg->feature_modules.pressure_acquisition     = 1U;
+    cfg->feature_modules.flow_acquisition         = 1U;
+    cfg->feature_modules.single_valve_control     = 1U;
+    cfg->feature_modules.electric_meter_modbus    = 1U;
+    cfg->feature_modules.soil_moisture_acquisition   = 1U;
+    cfg->feature_modules.soil_temperature_acquisition = 1U;
+    cfg->runtime_rules.heartbeat_interval_sec      = 0U;
+    cfg->runtime_rules.link_ping_interval_sec      = 120U;
+    cfg->runtime_rules.vitals_interval_sec         = 900U;
+    cfg->runtime_rules.vitals_csq_delta            = 5U;
+    cfg->runtime_rules.vitals_soc_delta            = 5U;
+    cfg->runtime_rules.snapshot_interval_sec       = 600U;
+    cfg->runtime_rules.runtime_tick_interval_sec = 1U;
+    cfg->runtime_rules.workflow_enabled          = 1U;
+    (void)strncpy(cfg->platform_tcp_host, FW_PLATFORM_TCP_HOST, sizeof(cfg->platform_tcp_host) - 1U);
+    cfg->platform_tcp_host[sizeof(cfg->platform_tcp_host) - 1U] = '\0';
+    cfg->platform_tcp_port                                     = FW_PLATFORM_TCP_PORT;
+    cfg->time_zone_quarter_hours                              = MODEL_DEFAULT_TIME_ZONE_QUARTER_HOURS;
+    (void)storage_config_commit_swap(cfg->config_version);
 }
 
 void app_main_init(void)

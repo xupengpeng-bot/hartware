@@ -26,6 +26,29 @@ uint8_t storage_config_active_slot(void)
     return s_active;
 }
 
+const device_config_t *storage_config_active(void)
+{
+    if (s_active == 0U) {
+        return s_slot_a_valid ? &s_slot_a : NULL;
+    }
+    return s_slot_b_valid ? &s_slot_b : NULL;
+}
+
+device_config_t *storage_config_inactive_mutable(void)
+{
+    device_config_t *slot;
+
+    if (s_active == 0U) {
+        slot = &s_slot_b;
+        s_slot_b_valid = true;
+    } else {
+        slot = &s_slot_a;
+        s_slot_a_valid = true;
+    }
+    memset(slot, 0, sizeof(*slot));
+    return slot;
+}
+
 int storage_config_load(device_config_t *out)
 {
     if (!out) {

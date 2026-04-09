@@ -212,50 +212,59 @@ static int validate_config(const device_config_t *cfg)
 int proto_sync_config_apply(const char *json, size_t json_len, char *ack_json, size_t ack_cap)
 {
     (void)json_len;
+    device_config_t *cfg;
+    const device_config_t *prev;
+
     if (!json) {
         return -1;
     }
-    device_config_t cfg;
-    memset(&cfg, 0, sizeof(cfg));
-    device_config_t prev;
-    int             prev_ok = storage_config_load(&prev);
-    if (proto_json_get_u32(json, "config_version", &cfg.config_version) != 0) {
+    cfg = storage_config_inactive_mutable();
+    if (cfg == NULL) {
+        return -1;
+    }
+    prev = storage_config_active();
+    if (proto_json_get_u32(json, "config_version", &cfg->config_version) != 0) {
         return -2;
     }
-    if (prev_ok == 0) {
-        (void)memcpy(cfg.platform_tcp_host, prev.platform_tcp_host, sizeof(cfg.platform_tcp_host));
-        cfg.platform_tcp_port = prev.platform_tcp_port;
+    if (prev != NULL) {
+        (void)memcpy(cfg->platform_tcp_host, prev->platform_tcp_host, sizeof(cfg->platform_tcp_host));
+        cfg->platform_tcp_port = prev->platform_tcp_port;
+        cfg->time_zone_quarter_hours = prev->time_zone_quarter_hours;
+    } else {
+        cfg->time_zone_quarter_hours = MODEL_DEFAULT_TIME_ZONE_QUARTER_HOURS;
     }
     {
         char     phost[MODEL_PLATFORM_HOST_MAX];
+        int32_t  tzq = 0;
         uint32_t pport = 0U;
         if (proto_json_get_string(json, "platform_tcp_host", phost, sizeof(phost)) == 0) {
-            (void)memcpy(cfg.platform_tcp_host, phost, sizeof(cfg.platform_tcp_host));
+            (void)memcpy(cfg->platform_tcp_host, phost, sizeof(cfg->platform_tcp_host));
         }
         if (proto_json_get_u32(json, "platform_tcp_port", &pport) == 0 && pport <= 65535U) {
-            cfg.platform_tcp_port = (uint16_t)pport;
+            cfg->platform_tcp_port = (uint16_t)pport;
+        }
+        if (proto_json_get_i32(json, "time_zone_quarter_hours", &tzq) == 0 &&
+            tzq >= -48 && tzq <= 56) {
+            cfg->time_zone_quarter_hours = (int16_t)tzq;
         }
     }
-    if (parse_features_nested(json, &cfg.feature_modules) != 0) {
+    if (parse_features_nested(json, &cfg->feature_modules) != 0) {
         return -3;
     }
-    if (parse_runtime_rules_nested(json, &cfg.runtime_rules) != 0) {
+    if (parse_runtime_rules_nested(json, &cfg->runtime_rules) != 0) {
         return -4;
     }
-    if (parse_bindings(json, &cfg) != 0) {
+    if (parse_bindings(json, cfg) != 0) {
         return -5;
     }
-    if (validate_config(&cfg) != 0) {
+    if (validate_config(cfg) != 0) {
         return -6;
     }
-    if (storage_config_stage_inactive(&cfg) != 0) {
-        return -7;
-    }
-    if (storage_config_commit_swap(cfg.config_version) != 0) {
+    if (storage_config_commit_swap(cfg->config_version) != 0) {
         return -8;
     }
     if (ack_json && ack_cap > 0U) {
-        (void)snprintf(ack_json, ack_cap, "\"config_version\":%lu", (unsigned long)cfg.config_version);
+        (void)snprintf(ack_json, ack_cap, "\"config_version\":%lu", (unsigned long)cfg->config_version);
     }
     return 0;
 }

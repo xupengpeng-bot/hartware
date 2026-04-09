@@ -10,6 +10,7 @@
 #include "proto_state_snapshot.h"
 #include "proto_heartbeat.h"
 #include "net_connectivity.h"
+#include "bsp_uart.h"
 
 #include <string.h>
 
@@ -27,6 +28,7 @@ static int16_t  s_last_sent_csq;
 static uint8_t  s_last_sent_soc;
 static uint8_t  s_vitals_baseline_ok;
 static uint8_t  s_boot_vitals_sent;
+static uint8_t  s_tick1s_trace_left;
 
 static char s_sched_snap[1536];
 static char s_sched_vitals[1024];
@@ -97,6 +99,7 @@ void app_scheduler_init(void)
     s_last_sent_soc      = 0U;
     s_vitals_baseline_ok = 0U;
     s_boot_vitals_sent  = 0U;
+    s_tick1s_trace_left = 6U;
 }
 
 void app_scheduler_tick(uint32_t monotonic_ms)
@@ -112,13 +115,33 @@ void app_scheduler_tick(uint32_t monotonic_ms)
     }
     if (monotonic_ms - s_last_1s >= 1000U) {
         s_last_1s = monotonic_ms;
+        if (s_tick1s_trace_left > 0U) {
+            bsp_debug_log("[SCHED][1s] begin\r\n");
+        }
         module_registry_tick_1s_all();
-        device_config_t cfg;
-        bool loaded = (storage_config_load(&cfg) == 0);
-        workflow_engine_poll_ready(loaded ? &cfg.runtime_rules : NULL, loaded,
+        if (s_tick1s_trace_left > 0U) {
+            bsp_debug_log("[SCHED][1s] after module_registry_tick_1s_all\r\n");
+        }
+        const device_config_t *cfg = storage_config_active();
+        bool loaded = (cfg != NULL);
+        if (s_tick1s_trace_left > 0U) {
+            bsp_debug_log(loaded ? "[SCHED][1s] storage_config_load OK\r\n"
+                                 : "[SCHED][1s] storage_config_load FAIL\r\n");
+        }
+        workflow_engine_poll_ready(loaded ? &cfg->runtime_rules : NULL, loaded,
                                    workflow_ready_key_modules_ok());
+        if (s_tick1s_trace_left > 0U) {
+            bsp_debug_log("[SCHED][1s] after workflow_engine_poll_ready\r\n");
+        }
         if (loaded) {
-            try_delta_vitals(&cfg.runtime_rules, monotonic_ms);
+            try_delta_vitals(&cfg->runtime_rules, monotonic_ms);
+            if (s_tick1s_trace_left > 0U) {
+                bsp_debug_log("[SCHED][1s] after try_delta_vitals\r\n");
+            }
+        }
+        if (s_tick1s_trace_left > 0U) {
+            bsp_debug_log("[SCHED][1s] end\r\n");
+            s_tick1s_trace_left--;
         }
     }
     if (monotonic_ms - s_last_30s >= 30000U) {
@@ -126,12 +149,12 @@ void app_scheduler_tick(uint32_t monotonic_ms)
         common_status_refresh_slow();
     }
 
-    device_config_t cfg2;
-    if (storage_config_load(&cfg2) != 0) {
+    const device_config_t *cfg2 = storage_config_active();
+    if (cfg2 == NULL) {
         return;
     }
 
-    const runtime_rules_t *rr = &cfg2.runtime_rules;
+    const runtime_rules_t *rr = &cfg2->runtime_rules;
     const common_status_t *st = common_status_get();
 
     if (!st->registered_once) {
@@ -156,11 +179,10 @@ void app_scheduler_tick(uint32_t monotonic_ms)
         if (monotonic_ms - s_last_ping >= iv_ping) {
             s_last_ping = monotonic_ms;
             s_hb_seq++;
-            char ping[768];
             uint32_t uptime_sec = monotonic_ms / 1000U;
-            int      n          = proto_heartbeat_build_ping(ping, sizeof(ping), s_hb_seq, uptime_sec);
+            int      n          = proto_heartbeat_build_ping(s_sched_vitals, sizeof(s_sched_vitals), s_hb_seq, uptime_sec);
             if (n > 0) {
-                int r = net_connectivity_send_json(ping, (size_t)n);
+                int r = net_connectivity_send_json(s_sched_vitals, (size_t)n);
                 if (r >= 0) {
                     common_status_pulse_heartbeat_led(monotonic_ms);
                 }

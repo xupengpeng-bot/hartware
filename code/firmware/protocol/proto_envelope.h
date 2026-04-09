@@ -43,6 +43,9 @@ int proto_envelope_decode(const uint8_t *wire, size_t wire_len, proto_envelope_t
 /** Write 4-byte BE length followed by body; returns total bytes written or negative. */
 int proto_envelope_encode(const char *json_body, size_t json_len, uint8_t *out, size_t out_cap);
 
+/** Shared outbound seq allocator for all hj-device-v2 messages. */
+uint32_t proto_envelope_take_seq_no(uint32_t seq_no);
+
 /**
  * Append common hj-device-v2 envelope fields and open payload object:
  * {"protocol":"hj-device-v2","type":"...","imei":"...","msg_id":"...","seq":...,"ts":"...","payload":{

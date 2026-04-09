@@ -18,6 +18,7 @@
 #include "proto_register.h"
 #include "proto_codec_json.h"
 #include "common_status.h"
+#include "bsp_rtc.h"
 #include "bsp_uart.h"
 
 #include <stdbool.h>
@@ -30,11 +31,16 @@ static uint32_t            s_last_connect_attempt_ms;
 static uint32_t            s_last_register_attempt_ms;
 static uint8_t             s_register_pending;
 static uint8_t             s_register_inflight;
+static uint8_t             s_register_backoff_pending;
+static uint32_t            s_last_online_drop_log_ms;
+static int                 s_last_register_build_rc;
 
-static char    s_nc_json[4096];
-static char    s_nc_reply[4096];
-static char    s_nc_register[1956];
-static uint8_t s_nc_wire[8192];
+#define NET_JSON_FRAME_MAX 4096U
+#define NET_WIRE_FRAME_MAX 4608U
+
+static char    s_nc_json[NET_JSON_FRAME_MAX];
+static char    s_nc_reply[NET_JSON_FRAME_MAX];
+static uint8_t s_nc_wire[NET_WIRE_FRAME_MAX];
 
 #define NET_RECONNECT_BACKOFF_MS 5000U
 #define NET_REGISTER_RETRY_MS    10000U
@@ -148,6 +154,30 @@ static int net_json_validate_business_frame(const char *json, size_t len)
     return 0;
 }
 
+static int tcp_send_json_frame(const char *json_body, size_t json_len)
+{
+    int w;
+
+    if (!json_body || json_len == 0U) {
+        return -1;
+    }
+    w = proto_envelope_encode(json_body, json_len, s_nc_wire, sizeof(s_nc_wire));
+    if (w < 0) {
+        return -2;
+    }
+    {
+        char line[96];
+        uint32_t be_len = ((uint32_t)s_nc_wire[0] << 24) | ((uint32_t)s_nc_wire[1] << 16) |
+                          ((uint32_t)s_nc_wire[2] << 8) | (uint32_t)s_nc_wire[3];
+        (void)snprintf(line, sizeof(line), "[NET] tx-wire total=%d prefix=%lu\r\n", w, (unsigned long)be_len);
+        bsp_debug_log(line);
+    }
+    if (s_sock.connected == 0) {
+        return -3;
+    }
+    return net_socket_client_send(&s_sock, s_nc_wire, (size_t)w);
+}
+
 static void net_log_json_short(const char *tag, const char *json, size_t len)
 {
     char line[220];
@@ -205,6 +235,8 @@ void net_connectivity_on_register_ack(void)
     common_status_set_registered(true);
     s_register_pending = 0U;
     s_register_inflight = 0U;
+    s_register_backoff_pending = 0U;
+    s_last_register_build_rc = 0;
     bsp_debug_log("[NET] register: REGISTER_ACK from platform\r\n");
 }
 
@@ -213,6 +245,8 @@ void net_connectivity_on_register_nack(void)
     common_status_set_registered(false);
     s_register_pending = 1U;
     s_register_inflight = 0U;
+    s_register_backoff_pending = 0U;
+    s_last_register_build_rc = 0;
     bsp_debug_log("[NET] register: REGISTER_NACK from platform\r\n");
 }
 
@@ -236,33 +270,70 @@ static void net_connectivity_try_register(uint32_t monotonic_ms)
     if (s_register_pending == 0U || s_sock.connected == 0) {
         return;
     }
-    if (s_register_inflight != 0U &&
-        (uint32_t)(monotonic_ms - s_last_register_attempt_ms) < NET_REGISTER_RETRY_MS) {
+    if (bsp_rtc_is_synced() == 0) {
+        if (s_register_backoff_pending == 0U && s_register_inflight == 0U) {
+            bsp_debug_log("[NET] register: waiting for valid RTC sync before first register\r\n");
+        }
+        s_register_inflight = 0U;
+        s_register_backoff_pending = 1U;
+        s_last_register_build_rc = -2;
+        s_last_register_attempt_ms = monotonic_ms;
         return;
+    }
+    if ((s_register_inflight != 0U || s_register_backoff_pending != 0U) &&
+        (uint32_t)(monotonic_ms - s_last_register_attempt_ms) < NET_REGISTER_RETRY_MS) {
+        if (!(s_register_backoff_pending != 0U &&
+              s_register_inflight == 0U &&
+              s_last_register_build_rc == -2 &&
+              bsp_rtc_is_synced() != 0)) {
+            return;
+        }
+        bsp_debug_log("[NET] register: RTC synced, retry immediately\r\n");
     }
     if (s_register_inflight != 0U) {
         bsp_debug_log("[NET] register: ACK timeout, retry send\r\n");
+    } else if (s_register_backoff_pending != 0U) {
+        bsp_debug_log("[NET] register: retry after local build/send backoff\r\n");
     }
     {
-        int n = proto_register_build(s_nc_register, sizeof(s_nc_register));
+        int n = proto_register_build(s_nc_reply, sizeof(s_nc_reply));
         if (n <= 0) {
-            bsp_debug_log("[NET] register: proto_register_build failed\r\n");
+            s_last_register_build_rc = n;
+            char line[112];
+            (void)snprintf(line, sizeof(line),
+                           "[NET] register: proto_register_build failed rc=%d, retry in %u ms\r\n",
+                           n,
+                           (unsigned)NET_REGISTER_RETRY_MS);
+            bsp_debug_log(line);
+            s_register_inflight = 0U;
+            s_register_backoff_pending = 1U;
+            s_last_register_attempt_ms = monotonic_ms;
             return;
         }
-        if (net_connectivity_send_json(s_nc_register, (size_t)n) >= 0) {
+        if (net_connectivity_send_json(s_nc_reply, (size_t)n) >= 0) {
             bsp_debug_log("[NET] register: sent (envelope on wire)\r\n");
             common_status_set_registered(false);
             s_register_inflight = 1U;
+            s_register_backoff_pending = 0U;
+            s_last_register_build_rc = 0;
             s_last_register_attempt_ms = monotonic_ms;
         } else {
-            bsp_debug_log("[NET] register: send failed (TCP down or encode error)\r\n");
+            char line[112];
+            (void)snprintf(line, sizeof(line),
+                           "[NET] register: send failed (TCP down or encode error), retry in %u ms\r\n",
+                           (unsigned)NET_REGISTER_RETRY_MS);
+            bsp_debug_log(line);
             s_register_inflight = 0U;
+            s_register_backoff_pending = 1U;
+            s_last_register_build_rc = 0;
+            s_last_register_attempt_ms = monotonic_ms;
         }
     }
 }
 
 void net_connectivity_init(void)
 {
+    bsp_rtc_reset();
     net_platform_config_init();
     net_socket_client_init(&s_sock);
     net_4g_modem_init();
@@ -270,6 +341,9 @@ void net_connectivity_init(void)
     s_last_register_attempt_ms = 0U;
     s_register_pending        = 1U;
     s_register_inflight       = 0U;
+    s_register_backoff_pending = 0U;
+    s_last_online_drop_log_ms = 0U;
+    s_last_register_build_rc = 0;
     common_status_set_online(net_4g_modem_is_online());
     common_status_set_registered(false);
 
@@ -299,6 +373,12 @@ void net_connectivity_poll(uint32_t monotonic_ms)
     common_status_set_online(net_4g_modem_is_online());
 
     if (!net_4g_modem_is_online()) {
+        if (s_sock.connected != 0 &&
+            (s_last_online_drop_log_ms == 0U ||
+             (uint32_t)(monotonic_ms - s_last_online_drop_log_ms) >= 5000U)) {
+            s_last_online_drop_log_ms = monotonic_ms;
+            bsp_debug_log("[NET] poll: modem online flag dropped while TCP client still marked connected\r\n");
+        }
         net_connectivity_mark_disconnected();
         return;
     }
@@ -310,6 +390,7 @@ void net_connectivity_poll(uint32_t monotonic_ms)
         common_status_set_registered(false);
         s_register_pending = 1U;
         s_register_inflight = 0U;
+        s_register_backoff_pending = 0U;
     }
 
     {
@@ -325,6 +406,8 @@ void net_connectivity_poll(uint32_t monotonic_ms)
                     common_status_set_registered(false);
                     s_register_pending = 1U;
                     s_register_inflight = 0U;
+                    s_register_backoff_pending = 0U;
+                    s_last_register_build_rc = 0;
                 } else {
                     bsp_debug_log("[NET] TCP reconnect: failed\r\n");
                 }
@@ -355,13 +438,10 @@ void net_connectivity_poll(uint32_t monotonic_ms)
                 bsp_debug_log("[NET] rx: dispatch error\r\n");
             }
             if (rlen > 0U) {
-                int w = proto_envelope_encode(s_nc_reply, rlen, s_nc_wire, sizeof(s_nc_wire));
-                if (w > 0) {
-                    if (net_socket_client_send(&s_sock, s_nc_wire, (size_t)w) >= 0) {
-                        bsp_debug_log("[NET] tx: command reply sent\r\n");
-                    } else {
-                        bsp_debug_log("[NET] tx: command reply send failed\r\n");
-                    }
+                if (tcp_send_json_frame(s_nc_reply, rlen) >= 0) {
+                    bsp_debug_log("[NET] tx: command reply sent\r\n");
+                } else {
+                    bsp_debug_log("[NET] tx: command reply send failed\r\n");
                 }
             }
         }
@@ -374,6 +454,8 @@ void net_connectivity_poll(uint32_t monotonic_ms)
         common_status_set_tcp_connected(false);
         common_status_set_registered(false);
         s_register_pending = 1U;
+        s_register_inflight = 0U;
+        s_register_backoff_pending = 0U;
     }
 }
 
@@ -393,19 +475,5 @@ int net_connectivity_send_json(const char *json_body, size_t json_len)
         }
     }
     net_log_json_short("tx-json", json_body, json_len);
-    int w = proto_envelope_encode(json_body, json_len, s_nc_wire, sizeof(s_nc_wire));
-    if (w < 0) {
-        return -3;
-    }
-    {
-        char line[96];
-        uint32_t be_len = ((uint32_t)s_nc_wire[0] << 24) | ((uint32_t)s_nc_wire[1] << 16) |
-                          ((uint32_t)s_nc_wire[2] << 8) | (uint32_t)s_nc_wire[3];
-        (void)snprintf(line, sizeof(line), "[NET] tx-wire total=%d prefix=%lu\r\n", w, (unsigned long)be_len);
-        bsp_debug_log(line);
-    }
-    if (s_sock.connected == 0) {
-        return -4;
-    }
-    return net_socket_client_send(&s_sock, s_nc_wire, (size_t)w);
+    return tcp_send_json_frame(json_body, json_len);
 }

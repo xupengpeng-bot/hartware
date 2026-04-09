@@ -61,15 +61,15 @@ void net_platform_config_set_api_path(const char *path)
 void net_platform_config_reload_from_device_config(void)
 {
     net_platform_config_init();
-    device_config_t cfg;
-    if (storage_config_load(&cfg) != 0) {
+    const device_config_t *cfg = storage_config_active();
+    if (cfg == NULL) {
         return;
     }
-    if (cfg.platform_tcp_host[0] != '\0') {
-        (void)strncpy(s_ep.tcp_host, cfg.platform_tcp_host, sizeof(s_ep.tcp_host) - 1U);
+    if (cfg->platform_tcp_host[0] != '\0') {
+        (void)strncpy(s_ep.tcp_host, cfg->platform_tcp_host, sizeof(s_ep.tcp_host) - 1U);
         s_ep.tcp_host[sizeof(s_ep.tcp_host) - 1U] = '\0';
     }
-    if (cfg.platform_tcp_port != 0U) {
-        s_ep.tcp_port = cfg.platform_tcp_port;
+    if (cfg->platform_tcp_port != 0U) {
+        s_ep.tcp_port = cfg->platform_tcp_port;
     }
 }

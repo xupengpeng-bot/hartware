@@ -1,7 +1,6 @@
 #include "workflow_card_reader.h"
 #include "bsp_uart.h"
 #include "common_status.h"
-#include "net_connectivity.h"
 #include "proto_event_report.h"
 #include "workflow_engine.h"
 #include "workflow_voice.h"
@@ -332,36 +331,27 @@ static int workflow_card_reader_emit_event(const char *event_code,
     char        safe_token[48];
     char        safe_reason[WORKFLOW_CARD_READER_REASON_LEN];
     char        safe_source[WORKFLOW_CARD_READER_SOURCE_LEN];
-    char        payload[512];
-    char        message[768];
     workflow_state_t state = workflow_engine_get_state();
     const common_status_t *status = common_status_get();
-    int         built;
 
     workflow_card_reader_copy_symbol(safe_token, sizeof(safe_token), token);
     workflow_card_reader_copy_symbol(safe_reason, sizeof(safe_reason), reason);
     workflow_card_reader_copy_symbol(safe_source, sizeof(safe_source), source_code);
-    (void)snprintf(payload, sizeof(payload),
-                   "\"card_token\":\"%s\","
-                   "\"swipe_source\":\"%s\","
-                   "\"reader_reason\":\"%s\","
-                   "\"workflow_state\":\"%s\","
-                   "\"ready\":%s,"
-                   "\"tcp_connected\":%s,"
-                   "\"stop_guard_remaining_ms\":%lu",
-                   safe_token,
-                   safe_source,
-                   safe_reason,
-                   workflow_card_reader_state_label(state),
-                   (status && status->ready) ? "true" : "false",
-                   (status && status->tcp_connected) ? "true" : "false",
-                   (unsigned long)workflow_engine_stop_guard_remaining_ms());
-
-    built = proto_event_report_build(message, sizeof(message), NULL, event_code, payload);
-    if (built <= 0) {
-        return -1;
-    }
-    return net_connectivity_send_json(message, (size_t)built);
+    return proto_event_report_sendf(NULL, event_code,
+                                    "\"card_token\":\"%s\","
+                                    "\"swipe_source\":\"%s\","
+                                    "\"reader_reason\":\"%s\","
+                                    "\"workflow_state\":\"%s\","
+                                    "\"ready\":%s,"
+                                    "\"tcp_connected\":%s,"
+                                    "\"stop_guard_remaining_ms\":%lu",
+                                    safe_token,
+                                    safe_source,
+                                    safe_reason,
+                                    workflow_card_reader_state_label(state),
+                                    (status && status->ready) ? "true" : "false",
+                                    (status && status->tcp_connected) ? "true" : "false",
+                                    (unsigned long)workflow_engine_stop_guard_remaining_ms());
 }
 
 static void workflow_card_reader_emit_rejected(const char *reason, const char *token, uint32_t now_ms)

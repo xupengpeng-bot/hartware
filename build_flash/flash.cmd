@@ -20,6 +20,15 @@ if defined BUILD_FLASH_OUT (
 
 )
 
+set "DEFAULT_BIN="
+if not defined BUILD_FLASH_OUT (
+    for /f "usebackq delims=" %%i in (`powershell -NoProfile -NonInteractive -Command ^
+        "$la=$env:LOCALAPPDATA; $c=@(); if($la){$c+=Join-Path $la 'hw_embedded_build\verify_netdiag\controller_fw.bin'; $c+=Join-Path $la 'hw_embedded_build\out\build\controller_fw.bin'}; $c+='%SCRIPT_DIR%out\build\controller_fw.bin'; $f=$c | Where-Object { Test-Path $_ }; if($f){($f | Sort-Object { (Get-Item $_).LastWriteTimeUtc } | Select-Object -Last 1)}"` ) do (
+        set "DEFAULT_BIN=%%i"
+    )
+)
+if not defined DEFAULT_BIN set "DEFAULT_BIN=%BUILD_DIR%\controller_fw.bin"
+
 
 
 call "%SCRIPT_DIR%env_tools.cmd"
@@ -32,7 +41,7 @@ rem 参数: [固件.bin路径] [串口 COMx，仅 SERIAL 模式需要]
 
 if "%~1"=="" (
 
-    set "BIN_FILE=%BUILD_DIR%\controller_fw.bin"
+    set "BIN_FILE=%DEFAULT_BIN%"
 
 ) else (
 
