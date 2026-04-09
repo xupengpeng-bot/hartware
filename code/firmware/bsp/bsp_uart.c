@@ -1,4 +1,4 @@
-#include "bsp_uart.h"
+﻿#include "bsp_uart.h"
 
 #include <string.h>
 
@@ -20,6 +20,7 @@
 #define RCC_CFGR       (*((volatile uint32_t *)(RCC_BASE + 0x04U)))
 #define RCC_APB2ENR    (*((volatile uint32_t *)(RCC_BASE + 0x18U)))
 #define RCC_APB1ENR    (*((volatile uint32_t *)(RCC_BASE + 0x1CU)))
+#define NVIC_ISER1     (*((volatile uint32_t *)0xE000E104U))
 
 #define GPIOA_CRL      (*((volatile uint32_t *)(GPIOA_BASE + 0x00U)))
 #define GPIOA_CRH      (*((volatile uint32_t *)(GPIOA_BASE + 0x04U)))
@@ -48,6 +49,7 @@
 #define RCC_APB1ENR_UART5EN  (1U << 20)
 
 #define USART_SR_TXE   (1U << 7)
+#define USART_SR_TC    (1U << 6)
 #define USART_SR_RXNE  (1U << 5)
 #define USART_SR_ORE   (1U << 3)
 #define USART_SR_FE    (1U << 1)
@@ -56,18 +58,21 @@
 #define USART_CR1_UE   (1U << 13)
 #define USART_CR1_TE   (1U << 3)
 #define USART_CR1_RE   (1U << 2)
+#define USART_CR1_RXNEIE (1U << 5)
 
-/* 8MHz 内核时的典型 BRR，仅作回退；正常用 stm32f103_usart_apb1_kernel_hz()+usart_brr_from_kernel() */
+/* 8MHz 鍐呮牳鏃剁殑鍏稿瀷 BRR锛屼粎浣滃洖閫€锛涙甯哥敤 stm32f103_usart_apb1_kernel_hz()+usart_brr_from_kernel() */
 #define USART_115200_8MHZ_BRR 0x45U
 #define USART_9600_8MHZ_BRR   0x341U
 
 #define USART_TX_SPIN_MAX 200000U
+#define UART4_RX_FIFO_CAP 32U
+#define UART4_IRQ_BIT      (1U << (52U - 32U))
 
 #define HSI_VALUE_HZ 8000000U
 
 #if !BOARD_CLOCK_LAO_CAO_HSI_8MHZ
 
-/** 仅从 RCC 寄存器推导 SYSCLK（Hz），与 SystemCoreClock 变量解耦，避免变量与硬件不一致时 UART BRR 错误 */
+/** 浠呬粠 RCC 瀵勫瓨鍣ㄦ帹瀵?SYSCLK锛圚z锛夛紝涓?SystemCoreClock 鍙橀噺瑙ｈ€︼紝閬垮厤鍙橀噺涓庣‖浠朵笉涓€鑷存椂 UART BRR 閿欒 */
 static uint32_t stm32f103_sysclk_hz_from_rcc(void)
 {
     uint32_t cfgr = RCC_CFGR;
@@ -85,7 +90,7 @@ static uint32_t stm32f103_sysclk_hz_from_rcc(void)
     return HSI_VALUE_HZ;
 }
 
-/** APB1 上 USART2/3/4/5 的内核时钟就是 PCLK1；2x 规则仅适用于定时器。 */
+/** APB1 涓?USART2/3/4/5 鐨勫唴鏍告椂閽熷氨鏄?PCLK1锛?x 瑙勫垯浠呴€傜敤浜庡畾鏃跺櫒銆?*/
 static uint32_t stm32f103_usart_apb1_kernel_hz(void)
 {
     uint32_t cfgr = RCC_CFGR;
@@ -110,7 +115,7 @@ static uint32_t stm32f103_usart_apb1_kernel_hz(void)
     }
 }
 
-/** USART1 在 APB2：时钟为 PCLK2（RM 时钟树，与 APB1 上 USART 的 2×PCLK 规则不同） */
+/** USART1 鍦?APB2锛氭椂閽熶负 PCLK2锛圧M 鏃堕挓鏍戯紝涓?APB1 涓?USART 鐨?2脳PCLK 瑙勫垯涓嶅悓锛?*/
 static uint32_t stm32f103_usart_apb2_kernel_hz(void)
 {
     uint32_t cfgr = RCC_CFGR;
@@ -173,6 +178,35 @@ static void uart4_clear_status_errors(void)
 static uint8_t s_usart1_cn3_ready;
 static uint8_t s_uart4_modem_ready;
 static uint8_t s_dbg_ready;
+static volatile uint8_t  s_uart4_rx_fifo[UART4_RX_FIFO_CAP];
+static volatile uint16_t s_uart4_rx_head;
+static volatile uint16_t s_uart4_rx_tail;
+
+static void uart4_fifo_reset(void)
+{
+    s_uart4_rx_head = 0U;
+    s_uart4_rx_tail = 0U;
+}
+
+static void uart4_fifo_push(uint8_t c)
+{
+    uint16_t next = (uint16_t)((s_uart4_rx_tail + 1U) % UART4_RX_FIFO_CAP);
+    if (next == s_uart4_rx_head) {
+        s_uart4_rx_head = (uint16_t)((s_uart4_rx_head + 1U) % UART4_RX_FIFO_CAP);
+    }
+    s_uart4_rx_fifo[s_uart4_rx_tail] = c;
+    s_uart4_rx_tail = next;
+}
+
+static int uart4_fifo_pop(uint8_t *out)
+{
+    if (out == NULL || s_uart4_rx_head == s_uart4_rx_tail) {
+        return 0;
+    }
+    *out = s_uart4_rx_fifo[s_uart4_rx_head];
+    s_uart4_rx_head = (uint16_t)((s_uart4_rx_head + 1U) % UART4_RX_FIFO_CAP);
+    return 1;
+}
 
 static void usart1_putc(uint8_t c)
 {
@@ -236,12 +270,11 @@ void bsp_uart_modem_reapply_pins(void)
     {
         uint32_t crh = GPIOC_CRH;
         crh &= ~(0xFFU << 8U);
-        /* PC10 TX AF PP；PC11 上拉输入（模组 UART 空闲常为高） */
+        /* Match the legacy firmware: PC10=TX4 AF_PP, PC11=RX4 floating input. */
         crh |= (0xBU << 8U);
-        crh |= (0x8U << 12U);
+        crh |= (0x4U << 12U);
         GPIOC_CRH = crh;
     }
-    GPIOC_ODR |= (1U << 11U);
 #endif
 }
 
@@ -262,7 +295,9 @@ void bsp_uart_modem_init(void)
 #else
     UART4_BRR = usart_brr_from_kernel_hz(stm32f103_usart_apb1_kernel_hz(), 115200U);
 #endif
-    UART4_CR1 = USART_CR1_TE | USART_CR1_RE | USART_CR1_UE;
+    uart4_fifo_reset();
+    UART4_CR1 = USART_CR1_TE | USART_CR1_RE | USART_CR1_RXNEIE | USART_CR1_UE;
+    NVIC_ISER1 = UART4_IRQ_BIT;
 
     uart4_clear_status_errors();
 
@@ -289,7 +324,8 @@ void bsp_uart_modem_set_baud(uint32_t baud)
         UART4_BRR = usart_brr_from_kernel_hz(ker, target);
     }
 #endif
-    UART4_CR1 = USART_CR1_TE | USART_CR1_RE | USART_CR1_UE;
+    uart4_fifo_reset();
+    UART4_CR1 = USART_CR1_TE | USART_CR1_RE | USART_CR1_RXNEIE | USART_CR1_UE;
     uart4_clear_status_errors();
 #else
     (void)baud;
@@ -309,7 +345,8 @@ void bsp_uart_modem_set_brr(uint32_t brr)
     }
     UART4_CR1 &= ~USART_CR1_UE;
     UART4_BRR = brr;
-    UART4_CR1 = USART_CR1_TE | USART_CR1_RE | USART_CR1_UE;
+    uart4_fifo_reset();
+    UART4_CR1 = USART_CR1_TE | USART_CR1_RE | USART_CR1_RXNEIE | USART_CR1_UE;
 #else
     (void)brr;
 #endif
@@ -350,16 +387,10 @@ static void cn4_uart5_init(void)
     {
         uint32_t crl = GPIOD_CRL;
         crl &= ~(0xFU << 8U);
-#if BOARD_CLOCK_LAO_CAO_HSI_8MHZ
-        crl |= (0x4U << 8U);
-#else
         crl |= (0x8U << 8U);
-#endif
         GPIOD_CRL = crl;
     }
-#if !BOARD_CLOCK_LAO_CAO_HSI_8MHZ
     GPIOD_ODR |= (1U << 2U);
-#endif
 
     UART5_CR1 = 0U;
 #if BOARD_CLOCK_LAO_CAO_HSI_8MHZ
@@ -369,12 +400,7 @@ static void cn4_uart5_init(void)
         UART5_BRR = USART_115200_8MHZ_BRR;
     }
 #else
-    if (BOARD_UART_DEBUG_BAUD == 115200U) {
-        uint32_t sw = (RCC_CFGR >> 2) & 3U;
-        UART5_BRR = (sw == 2U) ? 0x0271U : 0x0045U;
-    } else {
-        UART5_BRR = usart_brr_from_kernel_hz(stm32f103_usart_apb1_kernel_hz(), BOARD_UART_DEBUG_BAUD);
-    }
+    UART5_BRR = usart_brr_from_kernel_hz(stm32f103_usart_apb1_kernel_hz(), BOARD_UART_DEBUG_BAUD);
 #endif
     UART5_CR1 = USART_CR1_TE | USART_CR1_RE | USART_CR1_UE;
 }
@@ -446,6 +472,12 @@ int bsp_uart_write(int port, const uint8_t *data, size_t len)
         for (size_t i = 0U; i < len; i++) {
             uart4_putc(data[i]);
         }
+        {
+            uint32_t guard = USART_TX_SPIN_MAX;
+            while ((UART4_SR & USART_SR_TC) == 0U && guard > 0U) {
+                guard--;
+            }
+        }
         return (int)len;
     }
     if (port == (int)BOARD_HW_UART_PORT_DEBUG) {
@@ -474,8 +506,13 @@ int bsp_uart_read(int port, uint8_t *buf, size_t cap)
     }
     if (port == (int)BOARD_HW_UART_PORT_MODEM_4G && cap > 0U && buf != NULL) {
         uint32_t sr;
+        uint8_t  b;
         if (s_uart4_modem_ready == 0U) {
             bsp_uart_modem_init();
+        }
+        if (uart4_fifo_pop(&b) != 0) {
+            buf[0] = b;
+            return 1;
         }
         sr = UART4_SR;
         if ((sr & USART_SR_RXNE) != 0U) {
@@ -499,6 +536,24 @@ int bsp_uart_read(int port, uint8_t *buf, size_t cap)
     (void)buf;
     (void)cap;
     return 0;
+}
+
+void UART4_IRQHandler(void)
+{
+    uint32_t sr;
+
+    for (;;) {
+        sr = UART4_SR;
+        if ((sr & USART_SR_RXNE) != 0U) {
+            uart4_fifo_push((uint8_t)(UART4_DR & 0xFFU));
+            continue;
+        }
+        if ((sr & (USART_SR_ORE | USART_SR_FE | USART_SR_NE | USART_SR_PE)) != 0U) {
+            (void)UART4_DR;
+            continue;
+        }
+        break;
+    }
 }
 
 #else

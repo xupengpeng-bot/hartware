@@ -109,6 +109,13 @@ target_link_libraries(controller_firmware PUBLIC controller_ota)
 
 if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER MATCHES "arm-none-eabi")
     target_compile_definitions(controller_firmware PRIVATE BOARD_STM32F103=1)
+    # 未使用 FW_PLATFORM_CONFIG_DIR 时由编译器锁定北向 TCP，与 fw_build_config.h 一致，避免错误头文件覆盖
+    if(NOT FW_PLATFORM_CONFIG_DIR)
+        target_compile_definitions(controller_firmware PRIVATE
+            "FW_PLATFORM_TCP_HOST=\"xupengpeng.top\""
+            FW_PLATFORM_TCP_PORT=32563
+        )
+    endif()
     # 所有 .c 在预处理项目头文件前先包含 stdint.h，避免 uint32_t 未定义
     target_compile_options(controller_ota PRIVATE -include stdint.h)
     target_compile_options(controller_firmware PRIVATE -include stdint.h)

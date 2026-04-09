@@ -28,6 +28,7 @@
 
 #include "net_connectivity.h"
 #include "net_platform_config.h"
+#include "fw_build_config.h"
 #include "bsp_adc.h"
 #include "bsp_status_led.h"
 #include "bsp_uart.h"
@@ -136,6 +137,9 @@ static void app_seed_default_config(void)
     cfg.runtime_rules.snapshot_interval_sec       = 600U;
     cfg.runtime_rules.runtime_tick_interval_sec = 1U;
     cfg.runtime_rules.workflow_enabled          = 1U;
+    (void)strncpy(cfg.platform_tcp_host, FW_PLATFORM_TCP_HOST, sizeof(cfg.platform_tcp_host) - 1U);
+    cfg.platform_tcp_host[sizeof(cfg.platform_tcp_host) - 1U] = '\0';
+    cfg.platform_tcp_port                                     = FW_PLATFORM_TCP_PORT;
     (void)storage_config_stage_inactive(&cfg);
     (void)storage_config_commit_swap(cfg.config_version);
 }

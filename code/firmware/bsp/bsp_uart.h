@@ -17,7 +17,7 @@ void bsp_uart_modem_set_brr(uint32_t brr);
 /** UART4：按波特率写 BRR（内部按 RCC 计算内核时钟，与「老曹」工程 PLL 后 USART_Init 一致）。 */
 void bsp_uart_modem_set_baud(uint32_t baud);
 
-/** 仅重配 PC10/PC11（4G 用）；上拉 RX，避免与模组侧 CMOS 电平不匹配时一直无 RX。 */
+/** 仅重配 PC10/PC11（4G 用）；与参考程序一致：TX=AF_PP，RX=floating input。 */
 void bsp_uart_modem_reapply_pins(void);
 
 /** 按当前 RCC 重算 UART4 BRR（115200/9600）。 */

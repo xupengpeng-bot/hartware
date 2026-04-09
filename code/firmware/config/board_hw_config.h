@@ -19,12 +19,12 @@
 #endif
 
 /*
- * 与仓库内 Hardware/3.0 参考（老曹侧行为）一致：不跑 HSE/PLL，默认 HSI 8MHz；
- * UART4/5/USART1 用固定 BRR 表（115200=0x45），delay 与 8MHz 匹配。
- * 置 0 时启用 HSE+PLL 72MHz + 动态 USART 分频（与此前「新工程」路径一致）。
+ * 机井 3.0 参考程序实际运行在 HSE+PLL 72MHz。
+ * 置 0：启用 72MHz + 动态 USART BRR（当前默认，优先贴近参考程序）。
+ * 置 1：退回 HSI 8MHz + 固定 BRR 表，仅在排查时钟问题时临时使用。
  */
 #ifndef BOARD_CLOCK_LAO_CAO_HSI_8MHZ
-#define BOARD_CLOCK_LAO_CAO_HSI_8MHZ 1
+#define BOARD_CLOCK_LAO_CAO_HSI_8MHZ 0
 #endif
 
 /* 调试串口波特率（UART5）；乱码时可改为 9600 再试 */

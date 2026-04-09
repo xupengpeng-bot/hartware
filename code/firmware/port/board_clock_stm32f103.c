@@ -22,7 +22,6 @@
 
 #define RCC_CFGR_PLLMULL9   (7U << 18)
 #define RCC_CFGR_PLLSRC_HSE (1U << 16)
-#define RCC_CFGR_PPRE1_DIV2 (4U << 8)
 #define RCC_CFGR_SW_PLL     (2U << 0)
 
 uint32_t SystemCoreClock = 8000000U;
@@ -52,7 +51,7 @@ void board_clock_init(void)
 
     cfgr = RCC_CFGR;
     cfgr &= ~((0xFU << 18) | (1U << 16) | (7U << 8) | (7U << 11) | (0xFU << 4));
-    cfgr |= RCC_CFGR_PLLMULL9 | RCC_CFGR_PLLSRC_HSE | RCC_CFGR_PPRE1_DIV2;
+    cfgr |= RCC_CFGR_PLLMULL9 | RCC_CFGR_PLLSRC_HSE;
     RCC_CFGR = cfgr;
 
     RCC_CR |= RCC_CR_PLLON;

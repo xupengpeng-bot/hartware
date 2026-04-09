@@ -1,4 +1,5 @@
 #include "net_4g_modem.h"
+#include "fw_build_config.h"
 #include "board_hw_config.h"
 #include "bsp_system.h"
 #include "bsp_uart.h"
@@ -34,10 +35,10 @@
 /* 与参考工程 `机井3.0一体机带lora_APP清洁工程` 中 NETWORK_POWERKEY_HOLD_MS（5×delay_ms(1000)）一致 */
 #define MODEM_PWRKEY_HOLD_MS 5000U
 /* VccOff≈5s 略缩短为 4s；VccOn 后 2s + 拉键前再等 2s，与参考工程 network_task 一致 */
-#define MODEM_VCC_OFF_MS           4000U
+#define MODEM_VCC_OFF_MS           5000U
 #define MODEM_VCC_ON_SETTLE_MS     2000U
 #define MODEM_PRE_PWRKEY_MS        2000U
-#define MODEM_POST_PWRKEY_BOOT_MS  8000U
+#define MODEM_POST_PWRKEY_BOOT_MS  0U
 /* 重试：仍做掉电再上电，延时略短以加快二次尝试 */
 #define MODEM_RETRY_VCC_OFF_MS     3000U
 #define MODEM_RETRY_VCC_ON_MS      1500U
@@ -57,6 +58,9 @@ static size_t   s_tcp_head;
 static size_t   s_tcp_tail;
 static int      s_online;
 static int      s_tcp_connected;
+static int      s_tcp_direct_mode;
+
+static void tcp_fifo_push(const uint8_t *p, size_t n);
 
 static void modem_power_gpio_init(void)
 {
@@ -115,6 +119,19 @@ static void modem_pwrkey_run_pulse_inverted(int inverted, uint32_t hold_ms)
     modem_pwrkey_idle_inverted(inverted);
 }
 
+/* 老程序语义：PB4 切到有效后保持，不在本阶段再回空闲。 */
+static void modem_pwrkey_latch_on_inverted(int inverted, uint32_t hold_ms)
+{
+    modem_pwrkey_idle_inverted(inverted);
+    bsp_system_delay_ms(50U);
+    if (inverted) {
+        modem_pwrkey_set(1);
+    } else {
+        modem_pwrkey_set(0);
+    }
+    bsp_system_delay_ms(hold_ms);
+}
+
 static void modem_pwrkey_gpio_init(void)
 {
     uint32_t crl;
@@ -146,8 +163,10 @@ static void stm32f103_afio_release_pb4_from_jtag(void)
 static void modem_vcc_off_on_settle(uint32_t off_ms, uint32_t after_on_ms, uint32_t pre_pwrkey_ms)
 {
     modem_pwrkey_idle_inverted(BOARD_HW_MODEM_PWRKEY_INVERTED);
+    bsp_debug_log("[4G] ec600n VCC off\r\n");
     modem_power_set(0);
     bsp_system_delay_ms(off_ms);
+    bsp_debug_log("[4G] ec600n VCC on\r\n");
     modem_power_set(1);
     bsp_system_delay_ms(after_on_ms);
     bsp_system_delay_ms(pre_pwrkey_ms);
@@ -191,6 +210,10 @@ static void stream_push_from_uart(void)
 {
     uint8_t ch;
     while (bsp_uart_read((int)BOARD_HW_UART_PORT_MODEM_4G, &ch, 1U) > 0) {
+        if (s_tcp_connected != 0 && s_tcp_direct_mode != 0) {
+            tcp_fifo_push(&ch, 1U);
+            continue;
+        }
         if (s_rx_len < MODEM_STREAM_CAP) {
             s_rx_stream[s_rx_len++] = ch;
         } else {
@@ -402,6 +425,10 @@ static int modem_wait_qiopen_result(uint32_t timeout_ms)
         }
         if (ch == '\n') {
             line[li] = '\0';
+            if (strstr(line, "CONNECT") != NULL) {
+                bsp_debug_log("[4G] QIOPEN: CONNECT\r\n");
+                return 0;
+            }
             if (strstr(line, "+QIOPEN:") != NULL) {
                 unsigned cid = 0U;
                 int      err = -1;
@@ -434,7 +461,7 @@ static int modem_wait_qiopen_result(uint32_t timeout_ms)
             line[li++] = (char)ch;
         }
     }
-    bsp_debug_log("[4G] QIOPEN: timeout waiting +QIOPEN\r\n");
+    bsp_debug_log("[4G] QIOPEN: timeout waiting CONNECT/+QIOPEN\r\n");
     return -1;
 }
 
@@ -714,6 +741,7 @@ void net_4g_modem_init(void)
 {
     s_online = 0;
     s_tcp_connected = 0;
+    s_tcp_direct_mode = 0;
     s_rx_len = 0U;
     s_tcp_head = 0U;
     s_tcp_tail = 0U;
@@ -732,9 +760,11 @@ void net_4g_modem_init(void)
     modem_vcc_off_on_settle(MODEM_VCC_OFF_MS, MODEM_VCC_ON_SETTLE_MS, MODEM_PRE_PWRKEY_MS);
     modem_drain_hw_rx();
 
-    modem_pwrkey_run_pulse_inverted(BOARD_HW_MODEM_PWRKEY_INVERTED, MODEM_PWRKEY_HOLD_MS);
-    bsp_debug_log("[4G] PWRKEY pulse done, wait boot\r\n");
-    bsp_system_delay_ms(MODEM_POST_PWRKEY_BOOT_MS);
+    modem_pwrkey_latch_on_inverted(BOARD_HW_MODEM_PWRKEY_INVERTED, MODEM_PWRKEY_HOLD_MS);
+    bsp_debug_log("[4G] PWRKEY latched active (legacy compatible)\r\n");
+    if (MODEM_POST_PWRKEY_BOOT_MS > 0U) {
+        bsp_system_delay_ms(MODEM_POST_PWRKEY_BOOT_MS);
+    }
 
     if (modem_try_bringup_sequence() != 0) {
         return;
@@ -745,10 +775,11 @@ void net_4g_modem_init(void)
     modem_drain_hw_rx();
     {
         int alt = !BOARD_HW_MODEM_PWRKEY_INVERTED;
-        modem_pwrkey_idle_inverted(alt);
-        modem_pwrkey_run_pulse_inverted(alt, MODEM_PWRKEY_HOLD_MS);
+        modem_pwrkey_latch_on_inverted(alt, MODEM_PWRKEY_HOLD_MS);
     }
-    bsp_system_delay_ms(MODEM_POST_PWRKEY_BOOT_MS);
+    if (MODEM_POST_PWRKEY_BOOT_MS > 0U) {
+        bsp_system_delay_ms(MODEM_POST_PWRKEY_BOOT_MS);
+    }
     if (modem_try_bringup_sequence() != 0) {
         return;
     }
@@ -841,10 +872,16 @@ int net_4g_modem_tcp_connect(const char *host, uint16_t port)
     modem_drain_hw_rx();
     s_rx_len = 0U;
 
-    bsp_debug_log("[4G] TCP [1/4] PDP QICSGP (APN blank=auto)\r\n");
-    if (modem_at_simple_ok("AT+QICSGP=1,1,\"\",\"\",\"\",1\r\n", 5000U) != 0) {
-        bsp_debug_log("[4G] TCP [1/4] FAIL: QICSGP (PDP profile)\r\n");
-        return -1;
+    {
+        char apn_cmd[96];
+        char apn_log[96];
+        (void)snprintf(apn_log, sizeof(apn_log), "[4G] TCP [1/4] PDP QICSGP APN=%s\r\n", FW_PLATFORM_APN);
+        bsp_debug_log(apn_log);
+        (void)snprintf(apn_cmd, sizeof(apn_cmd), "AT+QICSGP=1,1,\"%s\",\"\",\"\",1\r\n", FW_PLATFORM_APN);
+        if (modem_at_simple_ok(apn_cmd, 5000U) != 0) {
+            bsp_debug_log("[4G] TCP [1/4] FAIL: QICSGP (PDP profile)\r\n");
+            return -1;
+        }
     }
     bsp_debug_log("[4G] TCP [1/4] OK: QICSGP\r\n");
 
@@ -884,7 +921,9 @@ int net_4g_modem_tcp_connect(const char *host, uint16_t port)
     }
 
     s_tcp_connected = 1;
+    s_tcp_direct_mode = 1;
     bsp_debug_log("[4G] TCP [4/4] OK: socket open, data path ready\r\n");
+    bsp_debug_log("[4G] TCP mode: direct UART payload (legacy access_mode=2)\r\n");
     return 0;
 #endif
 }
@@ -893,6 +932,7 @@ void net_4g_modem_tcp_close(void)
 {
 #if defined(BOARD_STM32F103)
     s_tcp_connected = 0;
+    s_tcp_direct_mode = 0;
     modem_drain_hw_rx();
     s_rx_len = 0U;
     (void)modem_at_simple_ok("AT+QICLOSE=0\r\n", 8000U);
@@ -906,8 +946,6 @@ int net_4g_modem_tcp_send(const uint8_t *data, size_t len)
     (void)len;
     return -1;
 #else
-    char hdr[48];
-
     if (data == NULL || len == 0U || s_tcp_connected == 0) {
         return -1;
     }
@@ -915,6 +953,18 @@ int net_4g_modem_tcp_send(const uint8_t *data, size_t len)
     if (len > 1460U) {
         len = 1460U;
     }
+
+    if (s_tcp_direct_mode != 0) {
+        int w = bsp_uart_write((int)BOARD_HW_UART_PORT_MODEM_4G, data, len);
+        if (w != (int)len) {
+            bsp_debug_log("[4G] TCP: direct write failed\r\n");
+            return -1;
+        }
+        return w;
+    }
+
+    {
+        char hdr[48];
 
     modem_drain_hw_rx();
     s_rx_len = 0U;
@@ -938,6 +988,7 @@ int net_4g_modem_tcp_send(const uint8_t *data, size_t len)
             bsp_debug_log("[4G] TCP: QISEND failed\r\n");
             return -1;
         }
+    }
     }
 
     return (int)len;
