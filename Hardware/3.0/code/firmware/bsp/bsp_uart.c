@@ -151,7 +151,8 @@ static void cn4_uart5_init(void)
     }
 
     UART5_CR1 = 0U;
-    UART5_BRR = USART_9600_8MHZ_BRR;
+    /* 与 UART4(4G) 一致用 115200@8MHz，避免串口助手默认 115200 时看不到日志 */
+    UART5_BRR = USART_115200_8MHZ_BRR;
     UART5_CR1 = USART_CR1_TE | USART_CR1_RE | USART_CR1_UE;
 }
 

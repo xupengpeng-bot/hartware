@@ -42,12 +42,13 @@ static int      s_tcp_connected;
 static void modem_power_gpio_init(void)
 {
     uint32_t crl;
+    const uint32_t shift = (uint32_t)BOARD_HW_PIN_NET_POWER_PORT_C * 4U;
 
     RCC_APB2ENR |= RCC_APB2ENR_IOPCEN;
 
     crl = GPIOC_CRL;
-    crl &= ~(0xFU << 20U);
-    crl |= (0x3U << 20U);
+    crl &= ~(0xFU << shift);
+    crl |= (0x3U << shift);
     GPIOC_CRL = crl;
 }
 
@@ -63,12 +64,14 @@ static void modem_power_set(int level)
 static void modem_pwrkey_gpio_init(void)
 {
     uint32_t crl;
+    /* PB4 -> CRL bits [19:16] = pin * 4 (was wrongly using offset 20 = PB5). */
+    const uint32_t shift = (uint32_t)BOARD_HW_PIN_NET_PWRKEY_PORT_B * 4U;
 
     RCC_APB2ENR |= RCC_APB2ENR_IOPBEN;
 
     crl = GPIOB_CRL;
-    crl &= ~(0xFU << 20U);
-    crl |= (0x3U << 20U);
+    crl &= ~(0xFU << shift);
+    crl |= (0x3U << shift);
     GPIOB_CRL = crl;
 
     GPIOB_BSRR = (1U << (BOARD_HW_PIN_NET_PWRKEY_PORT_B + 16U));
@@ -489,11 +492,57 @@ void net_4g_modem_init(void)
     bsp_debug_log("[4G] PWRKEY pulse sent, waiting for boot\r\n");
     bsp_system_delay_ms(5000U);
 
+    /* 飞行模式/省电态时先拉满射频再探测 */
+    (void)modem_at_simple_ok("AT+CFUN=1\r\n", 25000U);
+    bsp_system_delay_ms(2000U);
+    modem_drain_hw_rx();
+    s_rx_len = 0U;
+
     if (modem_probe_online() != 0) {
         s_online = 1;
         bsp_debug_log("[4G] modem responded to AT\r\n");
+        (void)modem_at_simple_ok("ATE0\r\n", 3000U);
     } else {
-        bsp_debug_log("[4G] modem did not respond to AT\r\n");
+        bsp_debug_log("[4G] modem did not respond to AT (poll will retry)\r\n");
+    }
+}
+
+static void modem_offline_recovery(uint32_t monotonic_ms)
+{
+    static uint32_t s_last_recovery_ms;
+    static uint8_t  s_cfun_once;
+
+    if (s_online != 0) {
+        return;
+    }
+    if (monotonic_ms < 8000U) {
+        return;
+    }
+    if (s_last_recovery_ms != 0U && (monotonic_ms - s_last_recovery_ms) < 20000U) {
+        return;
+    }
+    s_last_recovery_ms = monotonic_ms;
+
+    bsp_debug_log("[4G] offline recovery try\r\n");
+    modem_drain_hw_rx();
+    s_rx_len = 0U;
+    if (modem_probe_online() != 0) {
+        s_online = 1;
+        bsp_debug_log("[4G] modem OK (recovery)\r\n");
+        (void)modem_at_simple_ok("ATE0\r\n", 3000U);
+        return;
+    }
+    if (s_cfun_once == 0U) {
+        s_cfun_once = 1U;
+        (void)modem_at_simple_ok("AT+CFUN=1\r\n", 25000U);
+        bsp_system_delay_ms(3000U);
+        modem_drain_hw_rx();
+        s_rx_len = 0U;
+        if (modem_probe_online() != 0) {
+            s_online = 1;
+            bsp_debug_log("[4G] modem OK after CFUN (recovery)\r\n");
+            (void)modem_at_simple_ok("ATE0\r\n", 3000U);
+        }
     }
 }
 
@@ -615,8 +664,9 @@ int net_4g_modem_tcp_is_connected(void)
     return s_tcp_connected;
 }
 
-void net_4g_modem_poll(void)
+void net_4g_modem_poll(uint32_t monotonic_ms)
 {
     stream_push_from_uart();
     modem_process_stream_lines();
+    modem_offline_recovery(monotonic_ms);
 }

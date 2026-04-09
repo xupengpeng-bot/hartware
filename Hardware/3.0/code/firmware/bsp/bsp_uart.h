@@ -14,7 +14,7 @@ void bsp_uart_modem_init(void);
 /* CN3 card reader on USART1 (PA9/PA10). */
 void bsp_uart_card_reader_init(void);
 
-/* Debug output uses UART5 on the CN4 header: PC12(TX5) / PD2(RX5). */
+/* Debug output: UART5 PC12(TX5)/PD2(RX5), 115200 8N1 @ 8MHz HSI. */
 void bsp_uart_debug_init(void);
 
 void bsp_debug_log(const char *s);

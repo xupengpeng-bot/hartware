@@ -1,22 +1,19 @@
 /*
- * Board mapping aligned to SCH_Schematic1_1_2026-04-07.pdf and
- * ??_20260408(1).xlsx.
+ * 机井3.0 — 《机井3.0原理图优化.pdf》（与早期 SCH_Schematic1_1 / 2.x 板卡不同 PCB）
  *
- * Confirmed mappings from the schematic:
- * - CN3 card reader: USART1 on PA9/PA10
- * - 4G control: EC800_POWER on PC5, NET_PWRKEY on PB4
- * - RS485 sensor bus: USART2 on PA2/PA3, direction IO on PA1
- * - Battery detect: BAT_TEST enable on PB12, ACC analog sense on PA0
- *
- * The page-2 PNG text alignment for TX4/RX4/TX5/RX5 is visually ambiguous.
- * We follow the spreadsheet plus STM32F103 hardware UART pin mapping:
- * - UART4  -> PC10 / PC11
- * - UART5  -> PC12 / PD2
+ * STM32F103RCT6 外设引脚（与 PDF MCU 页、网络标一致）：
+ * - 4G：UART4 PC10/PC11；EC800_POWER=PC5；NET_PWRKEY=PB4（经电平/驱动至模组 PWRKEY）
+ * - 调试：UART5 PC12/PD2（机井3.0 在 CN5 等位置引出 TX5/RX5，另含 EC800_POWER 等）
+ * - 刷卡：USART1 PA9/PA10（CN3）
+ * - RS485：USART2 PA2/PA3，方向 PA1，隔离 U8 CA-IS3092W
+ * - 电池检测：BAT_TEST 使能 = PA12；ACC 采样 = PA0（ADC1_IN0）
+ * - 灯语：仅 RELAY1=PC3（联网/TCP）；PC1 原理图未用，第二路灯语关闭
+ * - LoRa / 语音 / SPI 等：同 PDF（固件按需扩展）
  */
 #ifndef BOARD_HW_CONFIG_H
 #define BOARD_HW_CONFIG_H
 
-#define BOARD_HW_SCHEMATIC_FILE "SCH_Schematic1_1_2026-04-07.pdf"
+#define BOARD_HW_SCHEMATIC_FILE "机井3.0原理图优化.pdf"
 #define BOARD_HW_MCU_PART_STR   "STM32F103RCT6"
 
 #define BOARD_HW_MODEM_PART_STR "EC801ECNLE-N01-SNNSA"
@@ -29,6 +26,7 @@
 #define BOARD_HW_PIN_UART4_TX_PORT_C 10U
 #define BOARD_HW_PIN_UART4_RX_PORT_C 11U
 #define BOARD_HW_PIN_NET_POWER_PORT_C 5U
+/* 已确认：PB4 = NET_PWRKEY */
 #define BOARD_HW_PIN_NET_PWRKEY_PORT_B 4U
 
 #define BOARD_HW_HAS_DUAL_SIM 1
@@ -45,7 +43,7 @@
 
 #define BOARD_HW_UART_PORT_CARD_READER BOARD_HW_USART_INSTANCE_CARD_READER
 
-/* CN4 debug header is exposed as logical port 5. */
+/* UART5 逻辑端口 5：PC12/PD2 */
 #define BOARD_HW_UART_PORT_CN4_DEBUG 5
 #define BOARD_HW_UART_PORT_DEBUG     BOARD_HW_UART_PORT_CN4_DEBUG
 
@@ -60,9 +58,11 @@
 #define BOARD_HW_MOTOR_DRIVER_STR "AS4950"
 
 #define BOARD_HW_PIN_ACC_PORT_A 0U
-#define BOARD_HW_PIN_BAT_TEST_ENABLE_PORT_B 12U
+/* 机井3.0：PA12；旧板为 PB12 时置 0 并改用下方 PORT_B */
+#define BOARD_HW_BAT_TEST_ON_GPIOA 1U
+#define BOARD_HW_PIN_BAT_TEST_ENABLE 12U
 
-/* Battery voltage is sampled on the ACC node after BAT_TEST enables Q4. */
+/* Battery voltage is sampled on the ACC node after BAT_TEST enables the sense path. */
 #define BOARD_HW_ADC1_CHANNEL_BAT_TEST 0U
 #define BOARD_HW_ADC_BAT_TEST_PORT_A_PIN 0U
 
@@ -71,5 +71,10 @@
 
 #define BOARD_HW_UART_PORT_MODEM_4G BOARD_HW_USART_INSTANCE_4G
 #define BOARD_HW_UART_PORT_RS485    BOARD_HW_USART_INSTANCE_RS485
+
+/* 灯语 A=联网/TCP → RELAY1(PC3)。B=注册/心跳：无第二路输出时设为 NONE */
+#define BOARD_HW_PIN_STATUS_LED_NONE     0xFFU
+#define BOARD_HW_PIN_STATUS_LED_A_PORT_C 3U
+#define BOARD_HW_PIN_STATUS_LED_B_PORT_C BOARD_HW_PIN_STATUS_LED_NONE
 
 #endif /* BOARD_HW_CONFIG_H */

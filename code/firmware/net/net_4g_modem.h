@@ -7,7 +7,7 @@
 
 void net_4g_modem_init(void);
 bool net_4g_modem_is_online(void);
-void net_4g_modem_poll(void);
+void net_4g_modem_poll(uint32_t monotonic_ms);
 
 /** Quectel AT+QI*：激活 PDP 并连接 TCP（见 net_4g_modem.c）。成功后可 send / poll 收包。 */
 int     net_4g_modem_tcp_connect(const char *host, uint16_t port);

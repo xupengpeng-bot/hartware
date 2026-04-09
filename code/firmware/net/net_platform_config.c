@@ -1,5 +1,7 @@
 #include "net_platform_config.h"
 #include "fw_build_config.h"
+#include "model_config.h"
+#include "storage_config.h"
 
 #include <string.h>
 
@@ -54,4 +56,20 @@ void net_platform_config_set_api_path(const char *path)
     }
     (void)strncpy(s_ep.api_path, path, sizeof(s_ep.api_path) - 1U);
     s_ep.api_path[sizeof(s_ep.api_path) - 1U] = '\0';
+}
+
+void net_platform_config_reload_from_device_config(void)
+{
+    net_platform_config_init();
+    device_config_t cfg;
+    if (storage_config_load(&cfg) != 0) {
+        return;
+    }
+    if (cfg.platform_tcp_host[0] != '\0') {
+        (void)strncpy(s_ep.tcp_host, cfg.platform_tcp_host, sizeof(s_ep.tcp_host) - 1U);
+        s_ep.tcp_host[sizeof(s_ep.tcp_host) - 1U] = '\0';
+    }
+    if (cfg.platform_tcp_port != 0U) {
+        s_ep.tcp_port = cfg.platform_tcp_port;
+    }
 }

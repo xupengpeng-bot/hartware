@@ -24,4 +24,7 @@ const char *net_platform_api_path(void);
 void net_platform_config_set_tcp(const char *host, uint16_t port);
 void net_platform_config_set_api_path(const char *path);
 
+/** 按 device_config 中的 platform_tcp_* 合并到编译期默认值（需已 storage_config_load 有效或 seed 后）。 */
+void net_platform_config_reload_from_device_config(void);
+
 #endif /* NET_PLATFORM_CONFIG_H */

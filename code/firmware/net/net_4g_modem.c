@@ -23,9 +23,28 @@
 
 #define RCC_APB2ENR_IOPBEN (1U << 3)
 #define RCC_APB2ENR_IOPCEN (1U << 4)
+#define RCC_APB2ENR_AFIOEN (1U << 0)
+
+#define AFIO_BASE   0x40010000U
+#define AFIO_MAPR   (*((volatile uint32_t *)(AFIO_BASE + 0x04U)))
+/* SWJ_CFG=010：关闭 JTAG，保留 SWD(PA13/14)；PB3/PB4/PA15 作普通 GPIO。PB4=NET_PWRKEY 否则为 NJTRST 无法开机 */
+#define AFIO_MAPR_SWJ_CFG_MASK (7U << 24)
+#define AFIO_MAPR_SWJ_CFG_JTAG_OFF_SWD_ON (2U << 24)
+
+/* 与参考工程 `机井3.0一体机带lora_APP清洁工程` 中 NETWORK_POWERKEY_HOLD_MS（5×delay_ms(1000)）一致 */
+#define MODEM_PWRKEY_HOLD_MS 5000U
+/* VccOff≈5s 略缩短为 4s；VccOn 后 2s + 拉键前再等 2s，与参考工程 network_task 一致 */
+#define MODEM_VCC_OFF_MS           4000U
+#define MODEM_VCC_ON_SETTLE_MS     2000U
+#define MODEM_PRE_PWRKEY_MS        2000U
+#define MODEM_POST_PWRKEY_BOOT_MS  8000U
+/* 重试：仍做掉电再上电，延时略短以加快二次尝试 */
+#define MODEM_RETRY_VCC_OFF_MS     3000U
+#define MODEM_RETRY_VCC_ON_MS      1500U
+#define MODEM_RETRY_PRE_KEY_MS     1500U
 
 /* F103RC RAM 紧张：URC 行解析与 TCP 载荷缓存尽量小；大帧依赖 net_socket_client 聚合。 */
-#define MODEM_STREAM_CAP   384U
+#define MODEM_STREAM_CAP   376U
 #define MODEM_LINE_MAX     256U
 #define TCP_RX_FIFO_CAP    768U
 #define TCP_CONNECT_ID     0U
@@ -42,12 +61,13 @@ static int      s_tcp_connected;
 static void modem_power_gpio_init(void)
 {
     uint32_t crl;
+    const uint32_t shift = (uint32_t)BOARD_HW_PIN_NET_POWER_PORT_C * 4U;
 
     RCC_APB2ENR |= RCC_APB2ENR_IOPCEN;
 
     crl = GPIOC_CRL;
-    crl &= ~(0xFU << 20U);
-    crl |= (0x3U << 20U);
+    crl &= ~(0xFU << shift);
+    crl |= (0x3U << shift);
     GPIOC_CRL = crl;
 }
 
@@ -60,20 +80,6 @@ static void modem_power_set(int level)
     }
 }
 
-static void modem_pwrkey_gpio_init(void)
-{
-    uint32_t crl;
-
-    RCC_APB2ENR |= RCC_APB2ENR_IOPBEN;
-
-    crl = GPIOB_CRL;
-    crl &= ~(0xFU << 20U);
-    crl |= (0x3U << 20U);
-    GPIOB_CRL = crl;
-
-    GPIOB_BSRR = (1U << (BOARD_HW_PIN_NET_PWRKEY_PORT_B + 16U));
-}
-
 static void modem_pwrkey_set(int level)
 {
     if (level != 0) {
@@ -83,7 +89,78 @@ static void modem_pwrkey_set(int level)
     }
 }
 
+/* inverted=1：经三极管时 MCU 高电平为有效脉冲；=0：MCU 直连 Quectel 时低脉冲有效 */
+static void modem_pwrkey_idle_inverted(int inverted)
+{
+    if (inverted) {
+        GPIOB_BSRR = (1U << (BOARD_HW_PIN_NET_PWRKEY_PORT_B + 16U));
+    } else {
+        GPIOB_BSRR = (1U << BOARD_HW_PIN_NET_PWRKEY_PORT_B);
+    }
+}
+
+static void modem_pwrkey_run_pulse_inverted(int inverted, uint32_t hold_ms)
+{
+    modem_pwrkey_idle_inverted(inverted);
+    bsp_system_delay_ms(50U);
+    if (inverted) {
+        modem_pwrkey_set(1);
+        bsp_system_delay_ms(hold_ms);
+        modem_pwrkey_set(0);
+    } else {
+        modem_pwrkey_set(0);
+        bsp_system_delay_ms(hold_ms);
+        modem_pwrkey_set(1);
+    }
+    modem_pwrkey_idle_inverted(inverted);
+}
+
+static void modem_pwrkey_gpio_init(void)
+{
+    uint32_t crl;
+    /* PB4 -> CRL bits [19:16] = pin * 4 (was wrongly using offset 20 = PB5). */
+    const uint32_t shift = (uint32_t)BOARD_HW_PIN_NET_PWRKEY_PORT_B * 4U;
+
+    RCC_APB2ENR |= RCC_APB2ENR_IOPBEN;
+
+    crl = GPIOB_CRL;
+    crl &= ~(0xFU << shift);
+    crl |= (0x3U << shift);
+    GPIOB_CRL = crl;
+
+    modem_pwrkey_idle_inverted(BOARD_HW_MODEM_PWRKEY_INVERTED);
+}
+
+static void stm32f103_afio_release_pb4_from_jtag(void)
+{
+    RCC_APB2ENR |= RCC_APB2ENR_AFIOEN;
+    {
+        uint32_t v = AFIO_MAPR;
+        v &= ~AFIO_MAPR_SWJ_CFG_MASK;
+        v |= AFIO_MAPR_SWJ_CFG_JTAG_OFF_SWD_ON;
+        AFIO_MAPR = v;
+    }
+}
+
+/** PWRKEY 空闲 -> 模组电源关 off_ms -> 开 after_on_ms + pre_pwrkey_ms，再调用方发 PWRKEY 脉冲 */
+static void modem_vcc_off_on_settle(uint32_t off_ms, uint32_t after_on_ms, uint32_t pre_pwrkey_ms)
+{
+    modem_pwrkey_idle_inverted(BOARD_HW_MODEM_PWRKEY_INVERTED);
+    modem_power_set(0);
+    bsp_system_delay_ms(off_ms);
+    modem_power_set(1);
+    bsp_system_delay_ms(after_on_ms);
+    bsp_system_delay_ms(pre_pwrkey_ms);
+}
+
 #else
+
+static void modem_vcc_off_on_settle(uint32_t off_ms, uint32_t after_on_ms, uint32_t pre_pwrkey_ms)
+{
+    (void)off_ms;
+    (void)after_on_ms;
+    (void)pre_pwrkey_ms;
+}
 
 static void modem_power_gpio_init(void) {}
 
@@ -98,6 +175,8 @@ static void modem_pwrkey_set(int level)
 {
     (void)level;
 }
+
+static void stm32f103_afio_release_pb4_from_jtag(void) {}
 
 #endif
 
@@ -118,6 +197,67 @@ static void stream_push_from_uart(void)
             memmove(s_rx_stream, s_rx_stream + 1U, MODEM_STREAM_CAP - 1U);
             s_rx_stream[MODEM_STREAM_CAP - 1U] = ch;
         }
+    }
+}
+
+/** 唤醒失败后：9600/115200 各嗅探一次，区分无 RX、错波特、有响应非 OK；日志仅 ASCII */
+static void modem_log_rx_sniff(void)
+{
+    int      pass;
+    int      any = 0;
+
+    for (pass = 0; pass < 2; pass++) {
+        uint8_t  tmp[20];
+        size_t   n = 0U;
+        uint32_t i;
+
+        if (pass == 0) {
+            bsp_uart_modem_set_baud(9600U);
+        } else {
+            bsp_uart_modem_set_baud(115200U);
+        }
+        modem_drain_hw_rx();
+        s_rx_len = 0U;
+        for (i = 0U; i < 120U; i++) {
+            stream_push_from_uart();
+            while (s_rx_len > 0U && n < sizeof(tmp)) {
+                tmp[n++] = s_rx_stream[0];
+                memmove(s_rx_stream, s_rx_stream + 1U, s_rx_len - 1U);
+                s_rx_len--;
+            }
+            bsp_system_delay_ms(1U);
+        }
+        if (n == 0U) {
+            continue;
+        }
+        any = 1;
+        {
+            char  line[100];
+            size_t pos = 0U;
+            int    w;
+
+            w = snprintf(
+                line + pos,
+                sizeof(line) - pos,
+                "[4G] RX sniff @%s: %u bytes:",
+                pass == 0 ? "9600" : "115200",
+                (unsigned)n
+            );
+            if (w > 0) {
+                pos += (size_t)w;
+            }
+            for (i = 0U; i < n && pos + 5U < sizeof(line); i++) {
+                w = snprintf(line + pos, sizeof(line) - pos, " %02X", (unsigned)tmp[i]);
+                if (w > 0) {
+                    pos += (size_t)w;
+                }
+            }
+            (void)snprintf(line + pos, sizeof(line) - pos, "\r\n");
+            bsp_debug_log(line);
+        }
+    }
+    if (any == 0) {
+        bsp_debug_log("[4G] RX sniff: silent at 9600 and 115200 (check UART wiring)\r\n");
     }
 }
 
@@ -265,9 +405,18 @@ static int modem_wait_qiopen_result(uint32_t timeout_ms)
             if (strstr(line, "+QIOPEN:") != NULL) {
                 unsigned cid = 0U;
                 int      err = -1;
-                if (sscanf(line, "+QIOPEN: %u,%d", &cid, &err) == 2 && (int)cid == TCP_CONNECT_ID && err == 0) {
-                    return 0;
+                if (sscanf(line, "+QIOPEN: %u,%d", &cid, &err) == 2) {
+                    if ((int)cid == TCP_CONNECT_ID && err == 0) {
+                        return 0;
+                    }
+                    {
+                        char eb[80];
+                        (void)snprintf(eb, sizeof(eb), "[4G] QIOPEN err=%d (cid=%u)\r\n", err, cid);
+                        bsp_debug_log(eb);
+                    }
+                    return -1;
                 }
+                bsp_debug_log("[4G] QIOPEN: bad +QIOPEN line\r\n");
                 return -1;
             }
             if (strstr(line, "OK") != NULL) {
@@ -275,6 +424,7 @@ static int modem_wait_qiopen_result(uint32_t timeout_ms)
                 continue;
             }
             if (strstr(line, "ERROR") != NULL) {
+                bsp_debug_log("[4G] QIOPEN: ERROR before result\r\n");
                 return -1;
             }
             li = 0U;
@@ -284,6 +434,7 @@ static int modem_wait_qiopen_result(uint32_t timeout_ms)
             line[li++] = (char)ch;
         }
     }
+    bsp_debug_log("[4G] QIOPEN: timeout waiting +QIOPEN\r\n");
     return -1;
 }
 
@@ -452,6 +603,7 @@ static void modem_process_stream_lines(void)
 static int modem_probe_online(void)
 {
     static const char at_cmd[] = "AT\r\n";
+    static uint8_t    s_probe_fail_logs_left = 3U;
 
     for (int attempt = 0; attempt < 5; ++attempt) {
         modem_drain_hw_rx();
@@ -462,6 +614,99 @@ static int modem_probe_online(void)
         }
         bsp_system_delay_ms(500U);
     }
+    if (s_probe_fail_logs_left > 0U) {
+        s_probe_fail_logs_left--;
+        bsp_debug_log("[4G] AT probe: no OK after 5 tries (UART/baud/modem?)\r\n");
+    }
+    return 0;
+}
+
+static int modem_at_ping_ok(uint32_t wait_ms)
+{
+    modem_drain_hw_rx();
+    s_rx_len = 0U;
+    (void)bsp_uart_write((int)BOARD_HW_UART_PORT_MODEM_4G, (const uint8_t *)"AT\r\n", 4U);
+    return modem_wait_substr("OK", wait_ms);
+}
+
+/** 0=失败；1=115200 已通；2=仅 9600 通（可尝试 AT+IPR 抬升） */
+static int modem_wake_at_multibaud(void)
+{
+    int r;
+
+    bsp_uart_modem_set_baud(115200U);
+    for (r = 0; r < 20; r++) {
+        if (modem_at_ping_ok(900U) == 0) {
+            return 1;
+        }
+        bsp_system_delay_ms(200U);
+    }
+
+    bsp_debug_log("[4G] AT no OK @115200, try 9600...\r\n");
+    bsp_uart_modem_set_baud(9600U);
+    for (r = 0; r < 20; r++) {
+        if (modem_at_ping_ok(900U) == 0) {
+            return 2;
+        }
+        bsp_system_delay_ms(200U);
+    }
+    return 0;
+}
+
+static void modem_try_raise_baud_to_115200(void)
+{
+    modem_drain_hw_rx();
+    s_rx_len = 0U;
+    if (modem_at_simple_ok("AT+IPR=115200\r\n", 4000U) != 0) {
+        bsp_debug_log("[4G] AT+IPR=115200 failed, stay 9600\r\n");
+        return;
+    }
+    bsp_system_delay_ms(150U);
+    bsp_uart_modem_set_baud(115200U);
+    modem_drain_hw_rx();
+    s_rx_len = 0U;
+    if (modem_at_ping_ok(1500U) != 0) {
+        bsp_debug_log("[4G] no AT OK after IPR, keep 9600\r\n");
+        bsp_uart_modem_set_baud(9600U);
+    } else {
+        bsp_debug_log("[4G] UART 115200 (AT+IPR)\r\n");
+    }
+}
+
+static int modem_try_bringup_sequence(void)
+{
+    int wake;
+
+    bsp_debug_log("[4G] AT wake (115200 then 9600)...\r\n");
+    wake = modem_wake_at_multibaud();
+    if (wake == 0) {
+        modem_log_rx_sniff();
+        bsp_debug_log("[4G] no AT OK, skip CFUN (check UART/PWRKEY/VCC)\r\n");
+        return 0;
+    }
+    if (wake == 2) {
+        modem_try_raise_baud_to_115200();
+    }
+
+    modem_drain_hw_rx();
+    s_rx_len = 0U;
+    if (modem_at_simple_ok("AT+CFUN=1\r\n", 10000U) != 0) {
+        bsp_debug_log("[4G] AT+CFUN=1: no OK\r\n");
+    } else {
+        bsp_debug_log("[4G] AT+CFUN=1: OK\r\n");
+    }
+    bsp_system_delay_ms(2000U);
+    modem_drain_hw_rx();
+    s_rx_len = 0U;
+
+    bsp_debug_log("[4G] AT probe (post-CFUN)...\r\n");
+    if (modem_probe_online() != 0) {
+        s_online = 1;
+        bsp_debug_log("[4G] modem responded to AT\r\n");
+        (void)modem_at_simple_ok("ATE0\r\n", 3000U);
+        return 1;
+    }
+    bsp_debug_log("[4G] modem did not respond to AT (poll will retry)\r\n");
     return 0;
 }
 
@@ -474,26 +719,88 @@ void net_4g_modem_init(void)
     s_tcp_tail = 0U;
 
     bsp_debug_log("[4G] init start\r\n");
+    /* 先于 UART4：与参考工程一致，避免 NJTRST 占用 PB4 */
+    stm32f103_afio_release_pb4_from_jtag();
+    bsp_debug_log("[4G] AFIO: JTAG off, PB4=GPIO PWRKEY\r\n");
     bsp_uart_modem_init();
+    bsp_uart_modem_log_rcc();
     modem_power_gpio_init();
     modem_pwrkey_gpio_init();
-    modem_power_set(1);
-    bsp_debug_log("[4G] power enabled\r\n");
-    bsp_system_delay_ms(200U);
+    bsp_uart_modem_reapply_pins();
+    bsp_uart_modem_sync_baud_to_rcc(115200U);
+    bsp_debug_log("[4G] cold: vcc off -> on + settle (legacy)\r\n");
+    modem_vcc_off_on_settle(MODEM_VCC_OFF_MS, MODEM_VCC_ON_SETTLE_MS, MODEM_PRE_PWRKEY_MS);
     modem_drain_hw_rx();
 
-    modem_pwrkey_set(1);
-    bsp_system_delay_ms(1200U);
-    modem_pwrkey_set(0);
+    modem_pwrkey_run_pulse_inverted(BOARD_HW_MODEM_PWRKEY_INVERTED, MODEM_PWRKEY_HOLD_MS);
+    bsp_debug_log("[4G] PWRKEY pulse done, wait boot\r\n");
+    bsp_system_delay_ms(MODEM_POST_PWRKEY_BOOT_MS);
 
-    bsp_debug_log("[4G] PWRKEY pulse sent, waiting for boot\r\n");
-    bsp_system_delay_ms(5000U);
+    if (modem_try_bringup_sequence() != 0) {
+        return;
+    }
 
+    bsp_debug_log("[4G] retry: opposite PWRKEY + power cycle\r\n");
+    modem_vcc_off_on_settle(MODEM_RETRY_VCC_OFF_MS, MODEM_RETRY_VCC_ON_MS, MODEM_RETRY_PRE_KEY_MS);
+    modem_drain_hw_rx();
+    {
+        int alt = !BOARD_HW_MODEM_PWRKEY_INVERTED;
+        modem_pwrkey_idle_inverted(alt);
+        modem_pwrkey_run_pulse_inverted(alt, MODEM_PWRKEY_HOLD_MS);
+    }
+    bsp_system_delay_ms(MODEM_POST_PWRKEY_BOOT_MS);
+    if (modem_try_bringup_sequence() != 0) {
+        return;
+    }
+}
+
+static void modem_offline_recovery(uint32_t monotonic_ms)
+{
+    static uint32_t s_last_recovery_ms;
+    static uint8_t  s_offline_notice_once;
+    static uint8_t  s_cfun_once;
+
+    if (s_online != 0) {
+        return;
+    }
+    if (monotonic_ms < MODEM_POST_PWRKEY_BOOT_MS) {
+        return;
+    }
+    if (s_last_recovery_ms != 0U && (monotonic_ms - s_last_recovery_ms) < 20000U) {
+        return;
+    }
+    s_last_recovery_ms = monotonic_ms;
+
+    if (s_offline_notice_once == 0U) {
+        s_offline_notice_once = 1U;
+        bsp_debug_log("[4G] modem offline, retrying AT every ~20s (check power/UART/PWRKEY)\r\n");
+    }
+    modem_drain_hw_rx();
+    s_rx_len = 0U;
     if (modem_probe_online() != 0) {
         s_online = 1;
-        bsp_debug_log("[4G] modem responded to AT\r\n");
-    } else {
-        bsp_debug_log("[4G] modem did not respond to AT\r\n");
+        bsp_debug_log("[4G] modem OK (recovery)\r\n");
+        (void)modem_at_simple_ok("ATE0\r\n", 3000U);
+        return;
+    }
+    if (s_cfun_once == 0U) {
+        s_cfun_once = 1U;
+        bsp_debug_log("[4G] recovery: AT+CFUN=1\r\n");
+        if (modem_at_simple_ok("AT+CFUN=1\r\n", 25000U) != 0) {
+            bsp_debug_log("[4G] recovery: CFUN no OK\r\n");
+        } else {
+            bsp_debug_log("[4G] recovery: CFUN OK\r\n");
+        }
+        bsp_system_delay_ms(3000U);
+        modem_drain_hw_rx();
+        s_rx_len = 0U;
+        if (modem_probe_online() != 0) {
+            s_online = 1;
+            bsp_debug_log("[4G] modem OK after CFUN (recovery)\r\n");
+            (void)modem_at_simple_ok("ATE0\r\n", 3000U);
+        } else {
+            bsp_debug_log("[4G] recovery: AT still dead after CFUN\r\n");
+        }
     }
 }
 
@@ -510,47 +817,74 @@ int net_4g_modem_tcp_connect(const char *host, uint16_t port)
     return -1;
 #else
     if (host == NULL || host[0] == '\0' || port == 0U || s_online == 0) {
+        if (s_online == 0) {
+            bsp_debug_log("[4G] TCP skip: modem offline (AT not OK)\r\n");
+        } else if (host == NULL || host[0] == '\0') {
+            bsp_debug_log("[4G] TCP skip: empty host\r\n");
+        } else {
+            bsp_debug_log("[4G] TCP skip: port=0\r\n");
+        }
         return -1;
+    }
+
+    {
+        char dial[128];
+        size_t hl = strlen(host);
+        if (hl > 48U) {
+            (void)snprintf(dial, sizeof(dial), "[4G] TCP chain: dial %.48s...:%u\r\n", host, (unsigned)port);
+        } else {
+            (void)snprintf(dial, sizeof(dial), "[4G] TCP chain: dial %s:%u\r\n", host, (unsigned)port);
+        }
+        bsp_debug_log(dial);
     }
 
     modem_drain_hw_rx();
     s_rx_len = 0U;
 
-    bsp_debug_log("[4G] TCP: QICSGP\r\n");
+    bsp_debug_log("[4G] TCP [1/4] PDP QICSGP (APN blank=auto)\r\n");
     if (modem_at_simple_ok("AT+QICSGP=1,1,\"\",\"\",\"\",1\r\n", 5000U) != 0) {
-        bsp_debug_log("[4G] TCP: QICSGP failed\r\n");
+        bsp_debug_log("[4G] TCP [1/4] FAIL: QICSGP (PDP profile)\r\n");
         return -1;
     }
+    bsp_debug_log("[4G] TCP [1/4] OK: QICSGP\r\n");
 
-    bsp_debug_log("[4G] TCP: QIACT\r\n");
+    bsp_debug_log("[4G] TCP [2/4] PDP QIACT (attach, may take 45s)\r\n");
     if (modem_at_simple_ok("AT+QIACT=1\r\n", 45000U) != 0) {
-        bsp_debug_log("[4G] TCP: QIACT failed (SIM/APN?)\r\n");
+        bsp_debug_log("[4G] TCP [2/4] FAIL: QIACT (SIM/APN/coverage? try AT+CPIN? / AT+CREG? on PC)\r\n");
         return -1;
     }
+    bsp_debug_log("[4G] TCP [2/4] OK: QIACT\r\n");
 
-    (void)modem_at_simple_ok("AT+QICLOSE=0\r\n", 8000U);
+    bsp_debug_log("[4G] TCP [3/4] QICLOSE cleanup\r\n");
+    if (modem_at_simple_ok("AT+QICLOSE=0\r\n", 8000U) != 0) {
+        bsp_debug_log("[4G] TCP [3/4] WARN: QICLOSE (continuing)\r\n");
+    } else {
+        bsp_debug_log("[4G] TCP [3/4] OK: QICLOSE\r\n");
+    }
 
     {
         char cmd[180];
-        int  n = snprintf(cmd, sizeof(cmd), "AT+QIOPEN=1,%u,\"TCP\",\"%s\",%u\r\n", TCP_CONNECT_ID, host, (unsigned)port);
+        /* 与参考「机井3.0一体机带lora(老曹改后)…network_task.c」EC_QIOPEN 一致：local_port=0, access_mode=2 */
+        int  n = snprintf(cmd, sizeof(cmd), "AT+QIOPEN=1,%u,\"TCP\",\"%s\",%u,0,2\r\n", TCP_CONNECT_ID, host, (unsigned)port);
         if (n <= 0 || (size_t)n >= sizeof(cmd)) {
-            bsp_debug_log("[4G] TCP: host too long\r\n");
+            bsp_debug_log("[4G] TCP [4/4] FAIL: host too long for AT cmd\r\n");
             return -1;
         }
-        bsp_debug_log("[4G] TCP: QIOPEN\r\n");
+        bsp_debug_log("[4G] TCP [4/4] QIOPEN TCP socket...\r\n");
         modem_drain_hw_rx();
         s_rx_len = 0U;
         if (modem_write_str(cmd) < 0) {
+            bsp_debug_log("[4G] TCP [4/4] FAIL: UART write QIOPEN\r\n");
             return -1;
         }
         if (modem_wait_qiopen_result(25000U) != 0) {
-            bsp_debug_log("[4G] TCP: QIOPEN failed\r\n");
+            bsp_debug_log("[4G] TCP [4/4] FAIL: QIOPEN (DNS/firewall/server?)\r\n");
             return -1;
         }
     }
 
     s_tcp_connected = 1;
-    bsp_debug_log("[4G] TCP: connected\r\n");
+    bsp_debug_log("[4G] TCP [4/4] OK: socket open, data path ready\r\n");
     return 0;
 #endif
 }
@@ -615,8 +949,9 @@ int net_4g_modem_tcp_is_connected(void)
     return s_tcp_connected;
 }
 
-void net_4g_modem_poll(void)
+void net_4g_modem_poll(uint32_t monotonic_ms)
 {
     stream_push_from_uart();
     modem_process_stream_lines();
+    modem_offline_recovery(monotonic_ms);
 }

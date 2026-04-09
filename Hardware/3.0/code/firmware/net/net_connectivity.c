@@ -1,7 +1,12 @@
 /**
- * 省流与保活建议（与 app_scheduler 分层心跳配合）：
- * - 传输层：在模组/BSP 开启 TCP keepalive（idle/interval/probes），减少仅靠应用 ping 的包量。
- * - 应用层：轻量 HEARTBEAT（hb_kind=ping）维持业务在线判定；体征用 hb_kind=vitals 低频或变化触发。
+ * 北向业务链路（单线程轮询）：
+ * 1) net_4g_modem：上电/离线恢复 → AT 在线 → PDP(AT+QIACT) → TCP(AT+QIOPEN)。
+ * 2) net_socket_client：把模组 RX 解析为帧；send 走 QISEND。
+ * 3) TCP 通后 net_connectivity_try_register：proto_register JSON → proto_envelope 发往平台。
+ * 4) proto_dispatch_handle_inbound：收平台 JSON，ACK/NACK 经 envelope 回写。
+ * 5) app_scheduler：link_ping / vitals / snapshot 周期调用 net_connectivity_send_json。
+ *
+ * 省流：传输层可开 TCP keepalive；应用层用 hb_kind=ping 保活，vitals 低频或变化触发。
  */
 #include "net_connectivity.h"
 #include "net_socket_client.h"
@@ -21,8 +26,7 @@ static uint8_t             s_register_pending;
 
 static char    s_nc_json[4096];
 static char    s_nc_reply[4096];
-/* 与 PR 合并后 RAM 余量约 48KB；register JSON 缓冲略减以通过链接 */
-static char    s_nc_register[1968];
+static char    s_nc_register[1956];
 static uint8_t s_nc_wire[8192];
 
 #define NET_RECONNECT_BACKOFF_MS 5000U
@@ -72,7 +76,7 @@ void net_connectivity_init(void)
 
 void net_connectivity_poll(uint32_t monotonic_ms)
 {
-    net_4g_modem_poll();
+    net_4g_modem_poll(monotonic_ms);
     common_status_set_online(net_4g_modem_is_online());
 
     if (!net_4g_modem_is_online()) {

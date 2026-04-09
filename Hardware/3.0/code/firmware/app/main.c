@@ -7,7 +7,7 @@
 int main(void)
 {
     bsp_uart_debug_init();
-    /* Debug logs are emitted on CN4=TX5(PC12) through UART5. */
+    /* Debug: UART5 PC12/PD2，115200 8N1（与 4G 口波特率习惯一致）。 */
     bsp_debug_log("\r\n\r\n=== APP main() entry ===\r\n");
 
     {

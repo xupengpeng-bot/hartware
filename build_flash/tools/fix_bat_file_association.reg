@@ -1,0 +1,16 @@
+Windows Registry Editor Version 5.00
+
+; Restore .bat -> cmd.exe (double-click runs batch files)
+; If .reg cannot be double-clicked: open cmd as Admin, then:
+;   reg import "D:\full\path\to\fix_bat_file_association.reg"
+; Log off or restart if needed.
+
+[HKEY_CLASSES_ROOT\.bat]
+@="batfile"
+"Content Type"="application/bat"
+
+[HKEY_CLASSES_ROOT\batfile]
+@="Windows Batch File"
+
+[HKEY_CLASSES_ROOT\batfile\shell\open\command]
+@="\"%SystemRoot%\\System32\\cmd.exe\" /c \"\"%1\"\" %*"

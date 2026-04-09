@@ -29,6 +29,7 @@
 #include "net_connectivity.h"
 #include "net_platform_config.h"
 #include "bsp_adc.h"
+#include "bsp_status_led.h"
 #include "bsp_uart.h"
 
 #include "proto_ota.h"
@@ -70,6 +71,8 @@ static int cb_sync_config(const char *json, size_t len, char *reply, size_t repl
     if (r != 0) {
         return proto_build_command_nack(reply, reply_cap, corr, session_ref[0] ? session_ref : NULL, r, "sync_config_failed");
     }
+    net_platform_config_reload_from_device_config();
+    net_connectivity_force_reconnect();
     device_config_t cfg;
     if (storage_config_load(&cfg) == 0) {
         common_status_set_config_version(cfg.config_version);
@@ -89,6 +92,18 @@ static int cb_execute(const char *json, size_t len, char *reply, size_t reply_ca
     return proto_execute_action_handle(json, len, reply, reply_cap);
 }
 
+static void cb_register_ack(void *user)
+{
+    (void)user;
+    net_connectivity_on_register_ack();
+}
+
+static void cb_register_nack(void *user)
+{
+    (void)user;
+    net_connectivity_on_register_nack();
+}
+
 static const proto_dispatch_handlers_t s_proto_handlers = {
     .on_register_build       = cb_register_build,
     .on_heartbeat_build      = cb_heartbeat_build,
@@ -96,6 +111,8 @@ static const proto_dispatch_handlers_t s_proto_handlers = {
     .on_sync_config          = cb_sync_config,
     .on_query                = cb_query,
     .on_execute_action       = cb_execute,
+    .on_register_ack         = cb_register_ack,
+    .on_register_nack        = cb_register_nack,
     .user                    = NULL,
 };
 
@@ -125,12 +142,12 @@ static void app_seed_default_config(void)
 
 void app_main_init(void)
 {
-    bsp_debug_log("[INIT] net_platform_config_init\r\n");
-    net_platform_config_init();
-
     bsp_debug_log("[INIT] storage_config_init + seed\r\n");
     storage_config_init();
     app_seed_default_config();
+
+    bsp_debug_log("[INIT] net_platform from device_config (defaults if empty)\r\n");
+    net_platform_config_reload_from_device_config();
 
     bsp_debug_log("[INIT] storage_runtime + recovery\r\n");
     storage_runtime_init();
@@ -198,5 +215,6 @@ void app_main_loop_iteration(uint32_t monotonic_ms)
     app_health_poll();
     app_scheduler_tick(monotonic_ms);
     net_connectivity_poll(monotonic_ms);
+    bsp_status_led_poll(monotonic_ms);
     proto_ota_poll();
 }
