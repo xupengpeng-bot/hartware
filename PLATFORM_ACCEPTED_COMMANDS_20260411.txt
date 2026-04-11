@@ -1,0 +1,236 @@
+扫码灌溉控制板 - 当前固件可接受指令清单
+生成日期: 2026-04-11
+适用固件目录: D:\20251211\智能体\hardware\new\code\firmware
+
+一、顶层短协议
+设备当前只接受以下顶层 envelope 字段:
+- v
+- t
+- i
+- m
+- s
+- c
+- r
+- p
+
+设备当前只接受以下入站消息类型:
+- SC
+- QR
+- EX
+
+其他入站类型一律返回 NK，不再兼容:
+- type
+- correlation_id
+- session_ref
+- payload
+- scope
+- query_code
+- action_code
+- command_code
+- module_code
+- AK
+- QS
+- RA
+- RN
+
+二、QUERY
+QR payload 只允许:
+- sc
+- qc
+- mc
+- tr
+- pm
+
+当前正式支持的查询只有 3 个:
+1. sc=cm, qc=qcs
+   说明: 查询通用状态
+   成功返回: QS
+   返回字段:
+   - rd
+   - on
+   - tc
+   - wf
+   - csq
+   - bs
+   - bv
+   - sv
+   - cv
+   - pm
+
+2. sc=wf, qc=qwf
+   说明: 查询工作流状态
+   成功返回: QS
+   返回字段:
+   - wf
+
+3. sc=cm, qc=qem
+   说明: 查询电表快照
+   成功返回: QS
+   返回字段:
+   - vv
+   - ia
+   - pw
+   - ek
+   - mp
+   当前 mp 固定为:
+   - dlt645_2007
+
+以下查询当前一律不兼容，必须按 NK 处理:
+- QUERY_STATE
+- QUERY_CHANNEL_STATE
+- query_power
+- query_breaker_state
+- query_meter_snapshot
+- 其他未列出的全部查询
+
+三、EXECUTE_ACTION
+EX payload 只允许:
+- sc
+- ac
+- tr
+- pm
+
+当前正式支持的动作只有:
+1. sc=cm, ac=ppu
+   说明: 播放提示音
+   目标通道:
+   - controller
+   可选参数:
+   - pm.pc
+
+2. sc=wf, ac=pas
+   说明: 暂停会话
+   目标通道:
+   - controller
+
+3. sc=wf, ac=res
+   说明: 恢复会话
+   目标通道:
+   - controller
+
+4. sc=md, ac=spu, tr=pump_1
+   说明: 启动水泵
+
+5. sc=md, ac=tpu, tr=pump_1
+   说明: 停止水泵
+
+6. sc=md, ac=ovl, tr=valve_1
+   说明: 开阀
+
+7. sc=md, ac=cvl, tr=valve_1
+   说明: 关阀
+
+以下动作当前必须按 NK 处理:
+- breaker_open
+- breaker_close
+- open_breaker
+- close_breaker
+- set_vfd_run
+- set_vfd_frequency
+- reboot_device
+- sync_clock
+- 其他未列出的全部动作
+
+四、SYNC_CONFIG
+SC payload 只允许:
+- cv
+- fm
+- rr
+- pc
+- cc
+
+其中:
+- cv 必填
+- fm 只允许真实已落地能力
+
+fm 当前允许的能力码只有:
+- pay
+- cdr
+- ebr
+- pwm
+- pdc
+- svl
+
+fm 当前不再允许:
+- bkr
+- bkf
+- prs
+- flw
+- sma
+- sta
+- rse
+- ale
+- alp
+- ahp
+- 其他未列出的全部能力码
+
+五、设备当前实际暴露的 feature_modules
+REGISTER.fm 当前默认只会上报:
+- pay
+- cdr
+- ebr
+- pwm
+- pdc
+- svl
+
+六、设备上报最小字段
+1. RG
+- hs
+- hr
+- ff
+- fv
+- cv
+- fm
+- mp
+
+2. HB
+- rd
+- on
+- tc
+- wf
+- csq
+- bs
+- bv
+- sv
+- cv
+- pm
+
+3. SS
+- wf
+- rt
+- vv
+- ia
+- pw
+- ek
+- ch
+
+七、NK 错误码
+当前固件会收口到以下短码:
+- UC = 不支持
+- PI = 参数错误
+- CE = 能力未开放或当前不可执行
+- CV = 配置版本错误
+- LB = 低电量
+- DB = 忙碌
+
+八、平台联调建议
+平台现在只按下面方式对接:
+1. 查询通用状态:
+- QR + sc=cm + qc=qcs
+
+2. 查询工作流:
+- QR + sc=wf + qc=qwf
+
+3. 查询电表:
+- QR + sc=cm + qc=qem
+
+4. 控制水泵/阀门:
+- EX + sc=md + ac=spu/tpu/ovl/cvl + tr=pump_1/valve_1
+
+5. 控制入口开关:
+- 有 pay 才开扫码
+- 有 cdr 才开刷卡
+- 有 ebr 才开电表
+- 有 pdc 或 svl 才开泵阀控制
+- 当前隐藏开合闸
+- 当前隐藏传感器区

@@ -143,10 +143,13 @@ int net_socket_client_poll(net_socket_client_t *c, uint32_t monotonic_ms, char *
 {
     (void)monotonic_ms;
 #if defined(BOARD_STM32F103)
-    uint8_t chunk[512];
+    uint8_t chunk[256];
     size_t  n;
     while ((n = net_4g_modem_tcp_rx_pop(chunk, sizeof(chunk))) > 0U) {
-        (void)net_socket_client_feed(c, chunk, n, out_json, out_cap, NULL);
+        int feed_rc = net_socket_client_feed(c, chunk, n, out_json, out_cap, out_json_len);
+        if (feed_rc == 1) {
+            return 1;
+        }
     }
 #endif
     return net_socket_client_feed(c, NULL, 0U, out_json, out_cap, out_json_len);

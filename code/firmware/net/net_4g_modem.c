@@ -4,6 +4,8 @@
 #include "bsp_system.h"
 #include "bsp_rtc.h"
 #include "bsp_uart.h"
+#include "common_identity.h"
+#include "common_status.h"
 #include "storage_config.h"
 
 #include <stdio.h>
@@ -54,6 +56,11 @@
 #define PDP_CONTEXT_ID     1U
 #define MODEM_TIME_MIN_YEAR 2024
 #define MODEM_TIME_MAX_YEAR 2039
+#define MODEM_QIRD_LINE_TIMEOUT_MS 500U
+#define MODEM_QIRD_DATA_BYTE_TIMEOUT_MS 50U
+#define MODEM_QIRD_TAIL_TIMEOUT_MS 200U
+#define MODEM_QIRD_PENDING_RETRY_MS 500U
+#define MODEM_QIRD_PENDING_NO_DATA_LIMIT 3U
 
 static uint8_t  s_rx_stream[MODEM_STREAM_CAP];
 static size_t   s_rx_len;
@@ -64,6 +71,18 @@ static int      s_online;
 static int      s_tcp_connected;
 static uint32_t s_last_online_change_ms;
 static uint32_t s_last_time_sync_attempt_ms;
+static uint32_t s_last_identity_attempt_ms;
+static uint32_t s_last_signal_attempt_ms;
+static uint8_t  s_qird_fail_streak;
+static unsigned s_qird_pending_len;
+static uint8_t  s_qird_pending_no_data_streak;
+static uint32_t s_qird_pending_retry_after_ms;
+
+typedef struct {
+    int      read_len;
+    unsigned data_len;
+    unsigned unread_len;
+} modem_qird_result_t;
 
 #define MODEM_RECOVERY_MAGIC 0x4D524543UL
 typedef struct {
@@ -78,6 +97,9 @@ typedef struct {
 static modem_recovery_state_t s_recovery;
 
 static void tcp_fifo_push(const uint8_t *p, size_t n);
+static void modem_drain_hw_rx(void);
+static int modem_getch_ms(uint32_t timeout_ms);
+static int modem_write_str(const char *s);
 static void modem_log_at_tx(const char *cmd);
 static void modem_log_at_rx_line(const char *line);
 static void modem_dump_qiact_failure_diagnostics(void);
@@ -86,6 +108,263 @@ static void modem_log_tcp_rx(const uint8_t *data, size_t len);
 static void modem_set_online_state(int online, const char *reason, uint32_t monotonic_ms);
 static void modem_recovery_state_reset(void);
 static void modem_recovery_state_validate_or_reset(uint32_t monotonic_ms);
+static int modem_try_refresh_identity(void);
+static int modem_query_cgatt_attached(void);
+static int modem_try_refresh_signal(void);
+static void modem_reset_qird_pending_state(void);
+
+static void modem_reset_qird_pending_state(void)
+{
+    s_qird_fail_streak = 0U;
+    s_qird_pending_len = 0U;
+    s_qird_pending_no_data_streak = 0U;
+    s_qird_pending_retry_after_ms = 0U;
+}
+
+static int modem_extract_span_token(const char *line, char *out, size_t out_cap,
+                                    size_t min_len, size_t max_len, int allow_alpha)
+{
+    size_t i = 0U;
+    size_t best_start = 0U;
+    size_t best_len = 0U;
+    int found = 0;
+
+    if (line == NULL || out == NULL || out_cap == 0U || min_len == 0U) {
+        return -1;
+    }
+
+    while (line[i] != '\0') {
+        size_t start = i;
+        size_t len = 0U;
+        while ((line[i] >= '0' && line[i] <= '9') ||
+               (allow_alpha != 0 &&
+                ((line[i] >= 'A' && line[i] <= 'Z') ||
+                 (line[i] >= 'a' && line[i] <= 'z')))) {
+            i++;
+            len++;
+        }
+        if (len >= min_len) {
+            if (max_len == 0U || len <= max_len) {
+                best_start = start;
+                best_len = len;
+                found = 1;
+                break;
+            }
+            best_start = start;
+            best_len = max_len;
+            found = 1;
+            break;
+        }
+        if (len == 0U) {
+            i++;
+        }
+    }
+
+    if (found == 0) {
+        return -1;
+    }
+    if (best_len >= out_cap) {
+        best_len = out_cap - 1U;
+    }
+    memcpy(out, line + best_start, best_len);
+    out[best_len] = '\0';
+    return (int)best_len;
+}
+
+static int modem_identity_is_ready(void)
+{
+    const controller_identity_t *id = common_identity_get();
+
+    if (id == NULL) {
+        return 0;
+    }
+    return (id->imei[0] != '\0' && id->iccid[0] != '\0') ? 1 : 0;
+}
+
+static int modem_query_identity_value(const char *cmd, char *out, size_t out_cap,
+                                      size_t min_len, size_t max_len, int allow_alpha)
+{
+    char line[MODEM_LINE_MAX];
+    size_t li = 0U;
+    uint32_t waited = 0U;
+    int saw_value = 0;
+
+    if (cmd == NULL || out == NULL || out_cap == 0U) {
+        return -1;
+    }
+
+    modem_drain_hw_rx();
+    s_rx_len = 0U;
+    out[0] = '\0';
+    if (modem_write_str(cmd) < 0) {
+        return -1;
+    }
+
+    while (waited < 5000U) {
+        int ch = modem_getch_ms(1U);
+        if (ch < 0) {
+            waited++;
+            continue;
+        }
+        if (ch == '\r') {
+            continue;
+        }
+        if (ch == '\n') {
+            line[li] = '\0';
+            if (li > 0U) {
+                modem_log_at_rx_line(line);
+                if (modem_extract_span_token(line, out, out_cap, min_len, max_len, allow_alpha) > 0) {
+                    saw_value = 1;
+                }
+                if (strstr(line, "OK") != NULL) {
+                    return saw_value != 0 ? 0 : -1;
+                }
+                if (strstr(line, "ERROR") != NULL || strstr(line, "+CME ERROR") != NULL) {
+                    return -1;
+                }
+            }
+            li = 0U;
+            continue;
+        }
+        if (li + 1U < sizeof(line)) {
+            line[li++] = (char)ch;
+        }
+    }
+
+    return saw_value != 0 ? 0 : -1;
+}
+
+static int modem_query_cgatt_attached(void)
+{
+    char line[MODEM_LINE_MAX];
+    size_t li = 0U;
+    uint32_t waited = 0U;
+    int attached = 0;
+
+    modem_drain_hw_rx();
+    s_rx_len = 0U;
+    if (modem_write_str("AT+CGATT?\r\n") < 0) {
+        return -1;
+    }
+
+    while (waited < 3000U) {
+        int ch = modem_getch_ms(1U);
+        if (ch < 0) {
+            waited++;
+            continue;
+        }
+        if (ch == '\r') {
+            continue;
+        }
+        if (ch == '\n') {
+            line[li] = '\0';
+            if (li > 0U) {
+                modem_log_at_rx_line(line);
+                if (strstr(line, "+CGATT: 1") != NULL) {
+                    attached = 1;
+                }
+                if (strstr(line, "OK") != NULL) {
+                    return attached;
+                }
+                if (strstr(line, "ERROR") != NULL || strstr(line, "+CME ERROR") != NULL) {
+                    return -1;
+                }
+            }
+            li = 0U;
+            continue;
+        }
+        if (li + 1U < sizeof(line)) {
+            line[li++] = (char)ch;
+        }
+    }
+    return attached;
+}
+
+static int modem_try_refresh_signal(void)
+{
+    char line[MODEM_LINE_MAX];
+    size_t li = 0U;
+    uint32_t waited = 0U;
+    int csq = -1;
+
+    modem_drain_hw_rx();
+    s_rx_len = 0U;
+    if (modem_write_str("AT+CSQ\r\n") < 0) {
+        return -1;
+    }
+
+    while (waited < 3000U) {
+        int ch = modem_getch_ms(1U);
+        if (ch < 0) {
+            waited++;
+            continue;
+        }
+        if (ch == '\r') {
+            continue;
+        }
+        if (ch == '\n') {
+            line[li] = '\0';
+            if (li > 0U) {
+                modem_log_at_rx_line(line);
+                if (sscanf(line, "+CSQ: %d", &csq) == 1) {
+                    common_status_set_signal((int16_t)csq, 0, 0);
+                }
+                if (strstr(line, "OK") != NULL) {
+                    return csq >= 0 ? 0 : -1;
+                }
+                if (strstr(line, "ERROR") != NULL || strstr(line, "+CME ERROR") != NULL) {
+                    return -1;
+                }
+            }
+            li = 0U;
+            continue;
+        }
+        if (li + 1U < sizeof(line)) {
+            line[li++] = (char)ch;
+        }
+    }
+
+    return csq >= 0 ? 0 : -1;
+}
+
+static int modem_try_refresh_identity(void)
+{
+    controller_identity_t *id = common_identity_mutable();
+    char imei[CTRL_IMEI_LEN];
+    char iccid[CTRL_ICCID_LEN];
+    char line[160];
+    int refreshed = 0;
+
+    if (id == NULL || s_online == 0) {
+        return -1;
+    }
+
+    if (id->imei[0] == '\0') {
+        imei[0] = '\0';
+        if (modem_query_identity_value("AT+CGSN\r\n", imei, sizeof(imei), 14U, 20U, 0) == 0) {
+            (void)strncpy(id->imei, imei, sizeof(id->imei) - 1U);
+            (void)snprintf(line, sizeof(line), "[4G] modem identity imei=%s\r\n", id->imei);
+            bsp_debug_log(line);
+            refreshed = 1;
+        } else {
+            bsp_debug_log("[4G] modem identity IMEI read failed\r\n");
+        }
+    }
+
+    if (id->iccid[0] == '\0') {
+        iccid[0] = '\0';
+        if (modem_query_identity_value("AT+QCCID\r\n", iccid, sizeof(iccid), 18U, 24U, 1) == 0) {
+            (void)strncpy(id->iccid, iccid, sizeof(id->iccid) - 1U);
+            (void)snprintf(line, sizeof(line), "[4G] modem identity iccid=%s\r\n", id->iccid);
+            bsp_debug_log(line);
+            refreshed = 1;
+        } else {
+            bsp_debug_log("[4G] modem identity ICCID read failed\r\n");
+        }
+    }
+
+    return modem_identity_is_ready() != 0 ? 0 : (refreshed != 0 ? -2 : -1);
+}
 
 static int modem_timezone_qh_valid(int tzq)
 {
@@ -382,7 +661,7 @@ static void modem_log_at_tx(const char *cmd)
     if (len > 96U) {
         len = 96U;
     }
-    (void)snprintf(line, sizeof(line), "[4G][AT->MODEM] %.*s\r\n", (int)len, cmd);
+    (void)snprintf(line, sizeof(line), "[AT-TX] %.*s\r\n", (int)len, cmd);
     bsp_debug_log(line);
 }
 
@@ -398,7 +677,7 @@ static void modem_log_at_rx_line(const char *line)
     if (len > 96U) {
         len = 96U;
     }
-    (void)snprintf(buf, sizeof(buf), "[4G][AT<-MODEM] %.*s\r\n", (int)len, line);
+    (void)snprintf(buf, sizeof(buf), "[AT-RX] %.*s\r\n", (int)len, line);
     bsp_debug_log(buf);
 }
 
@@ -484,14 +763,14 @@ static void modem_log_tcp_tx(const uint8_t *data, size_t len)
             json_len = 120U;
         }
         (void)snprintf(line, sizeof(line),
-                       "[4G][TCP->PLAT] frame_len=%lu prefix=%lu json=%.*s%s\r\n",
+                       "[TCP-TX] frame_len=%lu prefix=%lu json=%.*s%s\r\n",
                        (unsigned long)len,
                        (unsigned long)be_len,
                        (int)json_len,
                        (const char *)(data + 4U),
                        (len - 4U) > json_len ? "..." : "");
     } else {
-        (void)snprintf(line, sizeof(line), "[4G][TCP->PLAT] short frame len=%lu\r\n", (unsigned long)len);
+        (void)snprintf(line, sizeof(line), "[TCP-TX] short frame len=%lu\r\n", (unsigned long)len);
     }
     bsp_debug_log(line);
 }
@@ -508,19 +787,31 @@ static void modem_log_tcp_rx(const uint8_t *data, size_t len)
     if (len >= 4U) {
         be_len = ((uint32_t)data[0] << 24) | ((uint32_t)data[1] << 16) |
                  ((uint32_t)data[2] << 8) | (uint32_t)data[3];
+        if ((size_t)be_len + 4U > len) {
+            size_t shown = len > 120U ? 120U : len;
+            (void)snprintf(line, sizeof(line),
+                           "[TCP-RX] chunk_len=%lu partial_prefix=%lu bytes=%.*s%s\r\n",
+                           (unsigned long)len,
+                           (unsigned long)be_len,
+                           (int)shown,
+                           (const char *)data,
+                           len > shown ? "..." : "");
+            bsp_debug_log(line);
+            return;
+        }
         json_len = len - 4U;
         if (json_len > 120U) {
             json_len = 120U;
         }
         (void)snprintf(line, sizeof(line),
-                       "[4G][TCP<-PLAT] frame_len=%lu prefix=%lu json=%.*s%s\r\n",
+                       "[TCP-RX] frame_len=%lu prefix=%lu json=%.*s%s\r\n",
                        (unsigned long)len,
                        (unsigned long)be_len,
                        (int)json_len,
                        (const char *)(data + 4U),
                        (len - 4U) > json_len ? "..." : "");
     } else {
-        (void)snprintf(line, sizeof(line), "[4G][TCP<-PLAT] short frame len=%lu\r\n", (unsigned long)len);
+        (void)snprintf(line, sizeof(line), "[TCP-RX] short frame len=%lu\r\n", (unsigned long)len);
     }
     bsp_debug_log(line);
 }
@@ -681,6 +972,74 @@ static int modem_at_simple_ok_capture(const char *cmd, uint32_t timeout_ms, char
     return modem_wait_line_ok_or_err_capture(timeout_ms, last_line, last_line_cap);
 }
 
+static int modem_parse_qiact_active_line(const char *line, unsigned target_cid)
+{
+    unsigned cid = 0U;
+    unsigned state = 0U;
+    unsigned type = 0U;
+
+    if (line == NULL) {
+        return 0;
+    }
+
+    if (sscanf(line, "+QIACT: %u,%u,%u", &cid, &state, &type) >= 2) {
+        return (cid == target_cid && state == 1U) ? 1 : 0;
+    }
+
+    return 0;
+}
+
+static int modem_query_qiact_active(unsigned target_cid, char *matched_line, size_t matched_line_cap)
+{
+    char     line[MODEM_LINE_MAX];
+    size_t   li = 0U;
+    uint32_t waited = 0U;
+    int      saw_active = 0;
+
+    modem_drain_hw_rx();
+    s_rx_len = 0U;
+    if (matched_line != NULL && matched_line_cap > 0U) {
+        matched_line[0] = '\0';
+    }
+    if (modem_write_str("AT+QIACT?\r\n") < 0) {
+        return -1;
+    }
+
+    while (waited < 5000U) {
+        int ch = modem_getch_ms(1U);
+        if (ch < 0) {
+            waited++;
+            continue;
+        }
+        if (ch == '\r') {
+            continue;
+        }
+        if (ch == '\n') {
+            line[li] = '\0';
+            if (li > 0U) {
+                modem_log_at_rx_line(line);
+                if (modem_parse_qiact_active_line(line, target_cid) != 0) {
+                    saw_active = 1;
+                    modem_copy_line(matched_line, matched_line_cap, line);
+                }
+                if (strstr(line, "OK") != NULL) {
+                    return saw_active;
+                }
+                if (strstr(line, "ERROR") != NULL || strstr(line, "+CME ERROR") != NULL) {
+                    return saw_active != 0 ? 1 : -1;
+                }
+            }
+            li = 0U;
+            continue;
+        }
+        if (li + 1U < sizeof(line)) {
+            line[li++] = (char)ch;
+        }
+    }
+
+    return saw_active;
+}
+
 static int64_t days_from_civil_ymd(int year, unsigned month, unsigned day)
 {
     year -= (month <= 2U) ? 1 : 0;
@@ -789,7 +1148,7 @@ static int modem_try_sync_time_query(const char *cmd, const char *source_tag,
     uint32_t waited = 0U;
     int tzq = 0;
     int used_fallback = 0;
-    int saw_ok = 0;
+    int saw_synced = 0;
 
     if (cmd == NULL || source_tag == NULL || parser == NULL) {
         return -1;
@@ -838,6 +1197,7 @@ static int modem_try_sync_time_query(const char *cmd, const char *source_tag,
                                            source_tag, (unsigned long)unix_sec, tzq);
                         }
                         bsp_debug_log(ok);
+                        saw_synced = 1;
                     }
                 } else if (strncmp(line, "+QLTS:", 6) == 0 || strncmp(line, "+CCLK:", 6) == 0) {
                     char bad[160];
@@ -856,11 +1216,13 @@ static int modem_try_sync_time_query(const char *cmd, const char *source_tag,
                     bsp_debug_log("[TIME] QLTS local time not available yet\r\n");
                     return -1;
                 } else if (strstr(line, "OK") != NULL) {
-                    saw_ok = 1;
+                    if (saw_synced != 0) {
+                        return 0;
+                    }
                     if (bsp_rtc_is_synced() == 0) {
                         bsp_debug_log("[TIME] network time not available yet\r\n");
                     }
-                    return saw_ok;
+                    return -1;
                 } else if (strstr(line, "ERROR") != NULL || strstr(line, "+CME ERROR") != NULL) {
                     char err[96];
                     (void)snprintf(err, sizeof(err), "[TIME] %s query failed\r\n", source_tag);
@@ -946,11 +1308,16 @@ static int modem_wait_qiopen_result(uint32_t timeout_ms)
     return -1;
 }
 
-static int modem_qird_fetch(unsigned request_len)
+static int modem_qird_fetch(unsigned request_len, modem_qird_result_t *result)
 {
     char    cmd[48];
     char    line[MODEM_LINE_MAX];
     int     n_data = -1;
+    unsigned unread_len = 0U;
+
+    if (result != NULL) {
+        memset(result, 0, sizeof(*result));
+    }
 
     if (request_len == 0U) {
         return 0;
@@ -958,6 +1325,11 @@ static int modem_qird_fetch(unsigned request_len)
     /* 单次读取与 TCP 缓存匹配，剩余数据由下一次 +QIURC 再拉取 */
     if (request_len > 512U) {
         request_len = 512U;
+    }
+    {
+        char logline[96];
+        (void)snprintf(logline, sizeof(logline), "[4G] QIRD fetch request_len=%u\r\n", request_len);
+        bsp_debug_log(logline);
     }
     (void)snprintf(cmd, sizeof(cmd), "AT+QIRD=%u,%u\r\n", TCP_CONNECT_ID, (unsigned)request_len);
     if (modem_write_str(cmd) < 0) {
@@ -967,8 +1339,9 @@ static int modem_qird_fetch(unsigned request_len)
     for (;;) {
         size_t li = 0U;
         for (;;) {
-            int ch = modem_getch_ms(8000U);
+            int ch = modem_getch_ms(MODEM_QIRD_LINE_TIMEOUT_MS);
             if (ch < 0) {
+                bsp_debug_log("[4G] QIRD timeout waiting header line\r\n");
                 return -1;
             }
             if (ch == '\r') {
@@ -989,6 +1362,7 @@ static int modem_qird_fetch(unsigned request_len)
             int c = 0;
             if (sscanf(line, "+QIRD: %d,%d,%d", &a, &b, &c) == 3) {
                 n_data = b;
+                unread_len = (c > 0) ? (unsigned)c : 0U;
             } else if (sscanf(line, "+QIRD: %d", &a) == 1) {
                 n_data = a;
             } else {
@@ -1002,8 +1376,13 @@ static int modem_qird_fetch(unsigned request_len)
     }
 
     if (n_data <= 0) {
+        if (result != NULL) {
+            result->read_len = 0;
+            result->data_len = 0U;
+            result->unread_len = unread_len;
+        }
         for (;;) {
-            int ch = modem_getch_ms(2000U);
+            int ch = modem_getch_ms(MODEM_QIRD_TAIL_TIMEOUT_MS);
             if (ch < 0) {
                 break;
             }
@@ -1020,22 +1399,49 @@ static int modem_qird_fetch(unsigned request_len)
     {
         uint8_t tmp[256];
         int     remain = n_data;
+        int     total_read = 0;
         while (remain > 0) {
             int chunk = remain > (int)sizeof(tmp) ? (int)sizeof(tmp) : remain;
-            for (int i = 0; i < chunk; i++) {
-                int ch = modem_getch_ms(8000U);
+            int read_in_chunk = 0;
+            while (read_in_chunk < chunk) {
+                int ch = modem_getch_ms(MODEM_QIRD_DATA_BYTE_TIMEOUT_MS);
                 if (ch < 0) {
+                    if (read_in_chunk > 0) {
+                        tcp_fifo_push(tmp, (size_t)read_in_chunk);
+                        modem_log_tcp_rx(tmp, (size_t)read_in_chunk);
+                        total_read += read_in_chunk;
+                    }
+                    if (total_read > 0) {
+                        char part[96];
+                        if (result != NULL) {
+                            result->read_len = total_read;
+                            result->data_len = (unsigned)n_data;
+                            result->unread_len = unread_len;
+                        }
+                        (void)snprintf(part, sizeof(part),
+                                       "[4G] QIRD partial payload read=%d/%d, keep TCP alive\r\n",
+                                       total_read, n_data);
+                        bsp_debug_log(part);
+                        return total_read;
+                    }
+                    bsp_debug_log("[4G] QIRD timeout waiting payload byte\r\n");
                     return -1;
                 }
-                tmp[i] = (uint8_t)ch;
+                tmp[read_in_chunk++] = (uint8_t)ch;
             }
             tcp_fifo_push(tmp, (size_t)chunk);
             modem_log_tcp_rx(tmp, (size_t)chunk);
+            total_read += chunk;
             remain -= chunk;
         }
     }
 
-    (void)modem_wait_line_ok_or_err(3000U);
+    (void)modem_wait_line_ok_or_err(MODEM_QIRD_TAIL_TIMEOUT_MS);
+    if (result != NULL) {
+        result->read_len = n_data;
+        result->data_len = (unsigned)n_data;
+        result->unread_len = unread_len;
+    }
     return n_data;
 }
 
@@ -1045,6 +1451,7 @@ static void handle_urc_line(const char *line)
         return;
     }
     if (strstr(line, "+QIURC: \"closed\"") != NULL) {
+        modem_reset_qird_pending_state();
         s_tcp_connected = 0;
         bsp_debug_log("[4G] TCP closed by peer\r\n");
         return;
@@ -1052,6 +1459,7 @@ static void handle_urc_line(const char *line)
     if (strstr(line, "+QIURC: \"recv\"") == NULL) {
         return;
     }
+    bsp_debug_log("[4G] TCP recv URC\r\n");
 
     unsigned recv_len = 512U;
     {
@@ -1072,7 +1480,45 @@ static void handle_urc_line(const char *line)
             }
         }
     }
-    (void)modem_qird_fetch(recv_len);
+    {
+        modem_qird_result_t qird;
+        int fetch_rc = modem_qird_fetch(recv_len, &qird);
+        if (fetch_rc < 0) {
+            s_qird_fail_streak++;
+            if (s_qird_fail_streak >= 3U) {
+                modem_reset_qird_pending_state();
+                s_tcp_connected = 0;
+                bsp_debug_log("[4G] QIRD fetch failed repeatedly, mark TCP disconnected\r\n");
+            } else {
+                char linebuf[96];
+                (void)snprintf(linebuf, sizeof(linebuf),
+                               "[4G] QIRD fetch failed streak=%u, keep TCP alive\r\n",
+                               (unsigned)s_qird_fail_streak);
+                bsp_debug_log(linebuf);
+            }
+            return;
+        }
+        s_qird_fail_streak = 0U;
+        s_qird_pending_no_data_streak = 0U;
+        s_qird_pending_retry_after_ms = 0U;
+        if (qird.data_len > (unsigned)qird.read_len) {
+            s_qird_pending_len = (qird.data_len - (unsigned)qird.read_len) + qird.unread_len;
+        } else {
+            s_qird_pending_len = qird.unread_len;
+        }
+        if (s_qird_pending_len > 0U) {
+            {
+                char linebuf[112];
+                (void)snprintf(linebuf, sizeof(linebuf),
+                               "[4G] QIRD pending remain=%u after fetch=%d/%u unread=%u\r\n",
+                               s_qird_pending_len,
+                               qird.read_len,
+                               qird.data_len,
+                               qird.unread_len);
+                bsp_debug_log(linebuf);
+            }
+        }
+    }
 }
 
 static void modem_process_stream_lines(void)
@@ -1213,6 +1659,7 @@ static int modem_try_bringup_sequence(void)
         modem_set_online_state(1, "bringup probe after CFUN", 0U);
         bsp_debug_log("[4G] modem responded to AT\r\n");
         (void)modem_at_simple_ok("ATE0\r\n", 3000U);
+        (void)modem_try_refresh_identity();
         (void)modem_try_sync_time();
         return 1;
     }
@@ -1229,6 +1676,9 @@ void net_4g_modem_init(void)
     s_tcp_tail = 0U;
     s_last_online_change_ms = 0U;
     s_last_time_sync_attempt_ms = 0U;
+    s_last_identity_attempt_ms = 0U;
+    s_last_signal_attempt_ms = 0U;
+    modem_reset_qird_pending_state();
     modem_recovery_state_reset();
 
     bsp_debug_log("[4G] init start\r\n");
@@ -1308,6 +1758,7 @@ static void modem_offline_recovery(uint32_t monotonic_ms)
         modem_set_online_state(1, "offline recovery AT probe", monotonic_ms);
         bsp_debug_log("[4G] modem OK (recovery)\r\n");
         (void)modem_at_simple_ok("ATE0\r\n", 3000U);
+        (void)modem_try_refresh_identity();
         (void)modem_try_sync_time();
         return;
     }
@@ -1326,6 +1777,7 @@ static void modem_offline_recovery(uint32_t monotonic_ms)
             modem_set_online_state(1, "offline recovery CFUN", monotonic_ms);
             bsp_debug_log("[4G] modem OK after CFUN (recovery)\r\n");
             (void)modem_at_simple_ok("ATE0\r\n", 3000U);
+            (void)modem_try_refresh_identity();
             (void)modem_try_sync_time();
         } else {
             bsp_debug_log("[4G] recovery: AT still dead after CFUN\r\n");
@@ -1336,6 +1788,14 @@ static void modem_offline_recovery(uint32_t monotonic_ms)
 bool net_4g_modem_is_online(void)
 {
     return s_online != 0;
+}
+
+uint32_t net_4g_modem_online_age_ms(uint32_t monotonic_ms)
+{
+    if (s_online == 0 || monotonic_ms < s_last_online_change_ms) {
+        return 0U;
+    }
+    return monotonic_ms - s_last_online_change_ms;
 }
 
 int net_4g_modem_tcp_connect(const char *host, uint16_t port)
@@ -1383,17 +1843,32 @@ int net_4g_modem_tcp_connect(const char *host, uint16_t port)
     }
     bsp_debug_log("[4G] TCP [1/4] OK: QICSGP\r\n");
 
+    if (modem_query_cgatt_attached() != 1) {
+        bsp_debug_log("[4G] TCP precheck: CGATT not ready, skip QIACT this round\r\n");
+        return -1;
+    }
+
     bsp_debug_log("[4G] TCP [2/4] PDP QIACT (attach, may take 45s)\r\n");
     {
         char qiact_last[MODEM_LINE_MAX];
+        char qiact_active_line[MODEM_LINE_MAX];
         if (modem_at_simple_ok_capture("AT+QIACT=1\r\n", 45000U, qiact_last, sizeof(qiact_last)) != 0) {
             bsp_debug_log("[4G] TCP [2/4] FAIL: QIACT (SIM/APN/coverage? see diagnostics below)\r\n");
             if (qiact_last[0] != '\0') {
                 bsp_debug_log("[4G] TCP [2/4] last modem line before fail:\r\n");
                 modem_log_at_rx_line(qiact_last);
             }
-            modem_dump_qiact_failure_diagnostics();
-            return -1;
+            qiact_active_line[0] = '\0';
+            if (modem_query_qiact_active(PDP_CONTEXT_ID, qiact_active_line, sizeof(qiact_active_line)) > 0) {
+                bsp_debug_log("[4G] TCP [2/4] QIACT? shows PDP already active, continue\r\n");
+                if (qiact_active_line[0] != '\0') {
+                    bsp_debug_log("[4G] TCP [2/4] active context line:\r\n");
+                    modem_log_at_rx_line(qiact_active_line);
+                }
+            } else {
+                modem_dump_qiact_failure_diagnostics();
+                return -1;
+            }
         }
     }
     bsp_debug_log("[4G] TCP [2/4] OK: QIACT\r\n");
@@ -1426,6 +1901,7 @@ int net_4g_modem_tcp_connect(const char *host, uint16_t port)
         }
     }
 
+    modem_reset_qird_pending_state();
     s_tcp_connected = 1;
     bsp_debug_log("[4G] TCP [4/4] OK: socket open, data path ready\r\n");
     bsp_debug_log("[4G] TCP mode: AT control + QISEND/QIRD data plane\r\n");
@@ -1436,6 +1912,7 @@ int net_4g_modem_tcp_connect(const char *host, uint16_t port)
 void net_4g_modem_tcp_close(void)
 {
 #if defined(BOARD_STM32F103)
+    modem_reset_qird_pending_state();
     s_tcp_connected = 0;
     modem_drain_hw_rx();
     s_rx_len = 0U;
@@ -1468,8 +1945,15 @@ int net_4g_modem_tcp_send(const uint8_t *data, size_t len)
         if (modem_write_str(hdr) < 0) {
             return -1;
         }
+        {
+            char qlog[64];
+            (void)snprintf(qlog, sizeof(qlog), "[4G] TCP QISEND payload_len=%u\r\n", (unsigned)len);
+            bsp_debug_log(qlog);
+        }
 
         if (modem_wait_substr(">", 5000U) != 0) {
+            modem_reset_qird_pending_state();
+            s_tcp_connected = 0;
             bsp_debug_log("[4G] TCP: QISEND no prompt\r\n");
             return -1;
         }
@@ -1481,6 +1965,8 @@ int net_4g_modem_tcp_send(const uint8_t *data, size_t len)
 
         if (modem_wait_substr("SEND OK", 15000U) != 0) {
             if (modem_wait_line_ok_or_err(3000U) != 0) {
+                modem_reset_qird_pending_state();
+                s_tcp_connected = 0;
                 bsp_debug_log("[4G] TCP: QISEND failed\r\n");
                 return -1;
             }
@@ -1500,13 +1986,105 @@ void net_4g_modem_poll(uint32_t monotonic_ms)
 {
     stream_push_from_uart();
     modem_process_stream_lines();
+    if (s_online != 0 && s_tcp_connected != 0 && s_qird_pending_len > 0U) {
+        if (s_qird_pending_retry_after_ms != 0U &&
+            (int32_t)(monotonic_ms - s_qird_pending_retry_after_ms) < 0) {
+            goto pending_qird_done;
+        }
+        unsigned request_len = s_qird_pending_len > 512U ? 512U : s_qird_pending_len;
+        modem_qird_result_t qird;
+        int fetch_rc = modem_qird_fetch(request_len, &qird);
+        if (fetch_rc < 0) {
+            s_qird_fail_streak++;
+            s_qird_pending_no_data_streak = 0U;
+            s_qird_pending_retry_after_ms = monotonic_ms + MODEM_QIRD_PENDING_RETRY_MS;
+            if (s_qird_fail_streak >= 3U) {
+                modem_reset_qird_pending_state();
+                s_tcp_connected = 0;
+                bsp_debug_log("[4G] QIRD pending fetch failed repeatedly, mark TCP disconnected\r\n");
+            } else {
+                char linebuf[104];
+                (void)snprintf(linebuf, sizeof(linebuf),
+                               "[4G] QIRD pending fetch failed streak=%u, remain=%u\r\n",
+                               (unsigned)s_qird_fail_streak,
+                               s_qird_pending_len);
+                bsp_debug_log(linebuf);
+            }
+        } else if (fetch_rc == 0) {
+            s_qird_fail_streak = 0U;
+            s_qird_pending_no_data_streak++;
+            s_qird_pending_retry_after_ms = monotonic_ms + MODEM_QIRD_PENDING_RETRY_MS;
+            if (s_qird_pending_no_data_streak >= MODEM_QIRD_PENDING_NO_DATA_LIMIT) {
+                char linebuf[144];
+                (void)snprintf(linebuf, sizeof(linebuf),
+                               "[4G] QIRD pending no-data streak=%u remain=%u, mark TCP disconnected\r\n",
+                               (unsigned)s_qird_pending_no_data_streak,
+                               s_qird_pending_len);
+                bsp_debug_log(linebuf);
+                modem_reset_qird_pending_state();
+                s_tcp_connected = 0;
+            } else {
+                char linebuf[120];
+                (void)snprintf(linebuf, sizeof(linebuf),
+                               "[4G] QIRD pending fetch no data streak=%u remain=%u, backoff=%u ms\r\n",
+                               (unsigned)s_qird_pending_no_data_streak,
+                               s_qird_pending_len,
+                               (unsigned)MODEM_QIRD_PENDING_RETRY_MS);
+                bsp_debug_log(linebuf);
+            }
+        } else {
+            s_qird_fail_streak = 0U;
+            s_qird_pending_no_data_streak = 0U;
+            s_qird_pending_retry_after_ms = 0U;
+            {
+                unsigned next_pending = 0U;
+                if (qird.data_len > (unsigned)qird.read_len) {
+                    next_pending = (qird.data_len - (unsigned)qird.read_len) + qird.unread_len;
+                } else {
+                    next_pending = qird.unread_len;
+                }
+                s_qird_pending_len = next_pending;
+            }
+            if (s_qird_pending_len == 0U) {
+                s_qird_pending_len = 0U;
+                bsp_debug_log("[4G] QIRD pending drained fully\r\n");
+            } else {
+                {
+                    char linebuf[104];
+                    (void)snprintf(linebuf, sizeof(linebuf),
+                                   "[4G] QIRD pending remain=%u after fetch=%d/%u unread=%u\r\n",
+                                   s_qird_pending_len,
+                                   qird.read_len,
+                                   qird.data_len,
+                                   qird.unread_len);
+                    bsp_debug_log(linebuf);
+                }
+            }
+        }
+    }
+pending_qird_done:
     modem_offline_recovery(monotonic_ms);
+    if (s_online != 0 && modem_identity_is_ready() == 0) {
+        if (s_last_identity_attempt_ms == 0U ||
+            (uint32_t)(monotonic_ms - s_last_identity_attempt_ms) >= 15000U) {
+            s_last_identity_attempt_ms = monotonic_ms;
+            bsp_debug_log("[4G] periodic modem identity retry (CGSN/QCCID)\r\n");
+            (void)modem_try_refresh_identity();
+        }
+    }
     if (s_online != 0 && bsp_rtc_is_synced() == 0) {
         if (s_last_time_sync_attempt_ms == 0U ||
             (uint32_t)(monotonic_ms - s_last_time_sync_attempt_ms) >= 15000U) {
             s_last_time_sync_attempt_ms = monotonic_ms;
             bsp_debug_log("[TIME] periodic network time retry (QLTS->CCLK)\r\n");
             (void)modem_try_sync_time();
+        }
+    }
+    if (s_online != 0) {
+        if (s_last_signal_attempt_ms == 0U ||
+            (uint32_t)(monotonic_ms - s_last_signal_attempt_ms) >= 30000U) {
+            s_last_signal_attempt_ms = monotonic_ms;
+            (void)modem_try_refresh_signal();
         }
     }
 }

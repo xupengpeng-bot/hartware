@@ -19,7 +19,7 @@ void module_flow_tick_100ms(void)
 void module_flow_tick_1s(void)
 {
     s_val.instant_m3h = 0.0f;
-    s_val.quality = 1U;
+    s_val.quality = 0U;
 }
 
 uint8_t module_flow_apply_config(const module_flow_config_t *cfg)
@@ -68,6 +68,11 @@ static const module_ops_t s_ops = {
 const module_ops_t *module_flow_ops(void)
 {
     return &s_ops;
+}
+
+const char *module_flow_source_name(void)
+{
+    return "unknown";
 }
 
 int module_flow_get_instant(float *out_m3h)

@@ -24,22 +24,13 @@ void workflow_recovery_boot_check(void)
     }
 
     started_at_utc = runtime->recovery.last_session_started_at_utc;
+    (void)started_at_utc;
 
-    built = proto_event_report_sendf(session_ref, "power_loss_stop",
-                                     "\"abnormal_stop\":true,"
-                                     "\"stop_reason_code\":\"power_loss_stop\","
-                                     "\"dirty_session\":true,"
-                                     "\"started_at_utc\":%lu,"
-                                     "\"last_stop_at_utc\":%lu,"
-                                     "\"last_stop_reason_code\":%lu,"
-                                     "\"last_recovery_hint\":\"%s\","
-                                     "\"recovery_pending\":true,"
-                                     "\"settlement_pending\":%s",
-                                     (unsigned long)started_at_utc,
-                                     (unsigned long)runtime->recovery.last_stop_at_utc,
-                                     (unsigned long)runtime->recovery.last_stop_reason_code,
-                                     runtime->recovery.last_recovery_hint[0] ? runtime->recovery.last_recovery_hint : "",
-                                     runtime->recovery.settlement_pending ? "true" : "false");
+    built = proto_event_report_send_min(session_ref,
+                                        "pls",
+                                        "power_loss_stop",
+                                        runtime->recovery.last_recovery_hint[0] ? runtime->recovery.last_recovery_hint : NULL,
+                                        "pump_1");
     if (built < 0) {
         return;
     }

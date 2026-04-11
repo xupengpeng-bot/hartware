@@ -23,6 +23,7 @@ uint8_t module_flow_apply_config(const module_flow_config_t *cfg);
 uint8_t module_flow_query_state(void *out);
 uint8_t module_flow_query_values(void *out);
 uint8_t module_flow_execute_action(const char *action_code, const char *target_ref, const void *payload);
+const char *module_flow_source_name(void);
 
 const module_ops_t *module_flow_ops(void);
 int                 module_flow_get_instant(float *out_m3h);

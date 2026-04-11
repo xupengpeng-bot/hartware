@@ -1,5 +1,4 @@
 #include "proto_envelope.h"
-#include "bsp_rtc.h"
 #include "common_identity.h"
 #include <stdio.h>
 #include <string.h>
@@ -62,10 +61,10 @@ uint32_t proto_envelope_take_seq_no(uint32_t seq_no)
     return s_proto_seq;
 }
 
-static int append_optional_string_field(json_buf_t *jb, const char *key, const char *value)
+static int append_nullable_string_field(json_buf_t *jb, const char *key, const char *value)
 {
-    if (!jb || !key || !value || value[0] == '\0') {
-        return 0;
+    if (!jb || !key) {
+        return -1;
     }
     if (json_buf_append(jb, ",\"") != 0) {
         return -1;
@@ -73,29 +72,12 @@ static int append_optional_string_field(json_buf_t *jb, const char *key, const c
     if (json_buf_append(jb, key) != 0) {
         return -1;
     }
-    if (json_buf_append(jb, "\":\"") != 0) {
-        return -1;
-    }
-    if (json_escape_append(jb, value) != 0) {
-        return -1;
-    }
-    if (json_buf_append(jb, "\"") != 0) {
+    if (json_buf_append(jb, "\":\"") != 0 ||
+        json_escape_append(jb, value) != 0 ||
+        json_buf_append(jb, "\"") != 0) {
         return -1;
     }
     return 0;
-}
-
-static int append_mandatory_ts(json_buf_t *jb)
-{
-    char ts[32];
-    if (bsp_rtc_now_iso8601(ts, sizeof(ts), NULL) == 0) {
-        return append_optional_string_field(jb, "ts", ts);
-    }
-    if (bsp_rtc_format_iso8601(ts, sizeof(ts), 0U, bsp_rtc_configured_timezone_qh()) != 0) {
-        (void)strncpy(ts, "1970-01-01T08:00:00+08:00", sizeof(ts) - 1U);
-        ts[sizeof(ts) - 1U] = '\0';
-    }
-    return append_optional_string_field(jb, "ts", ts);
 }
 
 int proto_envelope_append_payload_prefix(json_buf_t *jb, const char *msg_type, uint32_t seq_no,
@@ -107,39 +89,39 @@ int proto_envelope_append_payload_prefix(json_buf_t *jb, const char *msg_type, u
     const controller_identity_t *id = common_identity_get();
     const char *imei = (id && id->imei[0] != '\0') ? id->imei : "";
     uint32_t seq = proto_envelope_take_seq_no(seq_no);
-    char msg_id[96];
-    (void)snprintf(msg_id, sizeof(msg_id), "%s-%lu", imei[0] != '\0' ? imei : "device", (unsigned long)seq);
-    if (json_buf_append(jb, "{\"protocol\":\"" PROTO_PROTOCOL_NAME "\",\"type\":\"") != 0) {
+    char msg_id[16];
+
+    (void)snprintf(msg_id, sizeof(msg_id), "%06lu", (unsigned long)seq);
+    if (json_buf_append(jb, "{\"v\":1,\"t\":\"") != 0) {
         return -1;
     }
     if (json_escape_append(jb, msg_type) != 0) {
         return -1;
     }
-    if (json_buf_append(jb, "\",\"imei\":\"") != 0) {
+    if (json_buf_append(jb, "\",\"i\":\"") != 0) {
         return -1;
     }
     if (json_escape_append(jb, imei) != 0) {
         return -1;
     }
-    if (json_buf_append(jb, "\",\"msg_id\":\"") != 0) {
+    if (json_buf_append(jb, "\",\"m\":\"") != 0) {
         return -1;
     }
     if (json_escape_append(jb, msg_id) != 0) {
         return -1;
     }
-    if (json_buf_append_fmt(jb, "\",\"seq\":%lu", (unsigned long)seq) != 0) {
+    if (json_buf_append_fmt(jb, "\",\"s\":%lu", (unsigned long)seq) != 0) {
         return -1;
     }
-    if (append_mandatory_ts(jb) != 0) {
+    if (correlation_id != NULL && correlation_id[0] != '\0' &&
+        append_nullable_string_field(jb, "c", correlation_id) != 0) {
         return -1;
     }
-    if (append_optional_string_field(jb, "correlation_id", correlation_id) != 0) {
+    if (session_ref != NULL && session_ref[0] != '\0' &&
+        append_nullable_string_field(jb, "r", session_ref) != 0) {
         return -1;
     }
-    if (append_optional_string_field(jb, "session_ref", session_ref) != 0) {
-        return -1;
-    }
-    if (json_buf_append(jb, ",\"payload\":{") != 0) {
+    if (json_buf_append(jb, ",\"p\":{") != 0) {
         return -1;
     }
     return 0;

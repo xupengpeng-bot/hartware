@@ -7,7 +7,8 @@
  * - 刷卡：USART1 PA9/PA10（CN3）
  * - RS485：USART2 PA2/PA3，方向 PA1，隔离 U8 CA-IS3092W
  * - 电池检测：BAT_TEST 使能 = PA12；ACC 采样 = PA0（ADC1_IN0）
- * - 灯语：仅 RELAY1=PC3（联网/TCP）；PC1 原理图未用，第二路灯语关闭
+ * - 继电器：RELAY1=PC3；当前固件将其作为 pump_run 真实输出
+ * - 灯语：PC1 原理图未用，当前不再复用 RELAY1 做状态灯，避免与泵输出冲突
  * - LoRa / 语音 / SPI 等：同 PDF（固件按需扩展）
  */
 #ifndef BOARD_HW_CONFIG_H
@@ -80,6 +81,21 @@
 #define BOARD_HW_VOICE_IC_STR     "BSO615NV"
 #define BOARD_HW_MOTOR_DRIVER_STR "AS4950"
 
+/*
+ * U7 语音芯片（原理图第 2 页）采用 one-line 控制接法：
+ * - PC4 -> DATA
+ * - PC8 -> RESET
+ * - PA8 -> BUSY
+ *
+ * 原理图网络名把 PA8 标成了 VOICE_CLK，但 U7 器件脚标实际为 BUSY。
+ * 固件按器件功能建模，避免继续把 BUSY 当成时钟输出。
+ */
+#define BOARD_HW_HAS_VOICE_CHIP          1U
+#define BOARD_HW_PIN_VOICE_DATA_PORT_C   4U
+#define BOARD_HW_PIN_VOICE_RESET_PORT_C  8U
+#define BOARD_HW_PIN_VOICE_BUSY_PORT_A   8U
+#define BOARD_HW_VOICE_BUSY_ACTIVE_LEVEL 0U
+
 #define BOARD_HW_PIN_ACC_PORT_A 0U
 /* 机井3.0：PA12；旧板为 PB12 时置 0 并改用下方 PORT_B */
 #define BOARD_HW_BAT_TEST_ON_GPIOA 1U
@@ -95,9 +111,14 @@
 #define BOARD_HW_UART_PORT_MODEM_4G BOARD_HW_USART_INSTANCE_4G
 #define BOARD_HW_UART_PORT_RS485    BOARD_HW_USART_INSTANCE_RS485
 
-/* 灯语 A=联网/TCP → RELAY1(PC3)。B=注册/心跳：无第二路输出时设为 NONE */
+/* RELAY1(PC3) 作为 pump_run 真实输出，不再复用为状态灯。 */
+#define BOARD_HW_PIN_RELAY1_PORT_C       3U
+#define BOARD_HW_PIN_PUMP_RUN_PORT_C     BOARD_HW_PIN_RELAY1_PORT_C
+#define BOARD_HW_PUMP_RUN_ACTIVE_LEVEL   1U
+
+/* 灯语：当前板无独立状态灯输出时全部关闭，避免与真实执行引脚冲突。 */
 #define BOARD_HW_PIN_STATUS_LED_NONE     0xFFU
-#define BOARD_HW_PIN_STATUS_LED_A_PORT_C 3U
+#define BOARD_HW_PIN_STATUS_LED_A_PORT_C BOARD_HW_PIN_STATUS_LED_NONE
 #define BOARD_HW_PIN_STATUS_LED_B_PORT_C BOARD_HW_PIN_STATUS_LED_NONE
 
 #endif /* BOARD_HW_CONFIG_H */

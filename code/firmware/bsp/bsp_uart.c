@@ -9,10 +9,12 @@
 #define RCC_BASE       0x40021000U
 #define GPIOA_BASE     0x40010800U
 #define GPIOC_BASE     0x40011000U
+#define GPIOA_ODR      (*((volatile uint32_t *)(GPIOA_BASE + 0x0CU)))
 #define GPIOC_ODR      (*((volatile uint32_t *)(GPIOC_BASE + 0x0CU)))
 #define GPIOD_BASE     0x40011400U
 #define GPIOD_ODR      (*((volatile uint32_t *)(GPIOD_BASE + 0x0CU)))
 #define USART1_BASE    0x40013800U
+#define USART2_BASE    0x40004400U
 #define UART4_BASE     0x40004C00U
 #define UART5_BASE     0x40005000U
 
@@ -30,6 +32,10 @@
 #define USART1_DR      (*((volatile uint32_t *)(USART1_BASE + 0x04U)))
 #define USART1_BRR     (*((volatile uint32_t *)(USART1_BASE + 0x08U)))
 #define USART1_CR1     (*((volatile uint32_t *)(USART1_BASE + 0x0CU)))
+#define USART2_SR      (*((volatile uint32_t *)(USART2_BASE + 0x00U)))
+#define USART2_DR      (*((volatile uint32_t *)(USART2_BASE + 0x04U)))
+#define USART2_BRR     (*((volatile uint32_t *)(USART2_BASE + 0x08U)))
+#define USART2_CR1     (*((volatile uint32_t *)(USART2_BASE + 0x0CU)))
 
 #define UART4_SR       (*((volatile uint32_t *)(UART4_BASE + 0x00U)))
 #define UART4_DR       (*((volatile uint32_t *)(UART4_BASE + 0x04U)))
@@ -45,6 +51,7 @@
 #define RCC_APB2ENR_IOPCEN   (1U << 4)
 #define RCC_APB2ENR_IOPDEN   (1U << 5)
 #define RCC_APB2ENR_USART1EN (1U << 14)
+#define RCC_APB1ENR_USART2EN (1U << 17)
 #define RCC_APB1ENR_UART4EN  (1U << 19)
 #define RCC_APB1ENR_UART5EN  (1U << 20)
 
@@ -56,6 +63,9 @@
 #define USART_SR_NE    (1U << 2)
 #define USART_SR_PE    (1U << 0)
 #define USART_CR1_UE   (1U << 13)
+#define USART_CR1_M    (1U << 12)
+#define USART_CR1_PCE  (1U << 10)
+#define USART_CR1_PS   (1U << 9)
 #define USART_CR1_TE   (1U << 3)
 #define USART_CR1_RE   (1U << 2)
 #define USART_CR1_RXNEIE (1U << 5)
@@ -63,10 +73,16 @@
 /* 8MHz 鍐呮牳鏃剁殑鍏稿瀷 BRR锛屼粎浣滃洖閫€锛涙甯哥敤 stm32f103_usart_apb1_kernel_hz()+usart_brr_from_kernel() */
 #define USART_115200_8MHZ_BRR 0x45U
 #define USART_9600_8MHZ_BRR   0x341U
+#define USART_2400_8MHZ_BRR   0xD05U
 
 #define USART_TX_SPIN_MAX 200000U
+#define UART1_RX_FIFO_CAP 128U
+#define UART2_RX_FIFO_CAP 128U
 #define UART4_RX_FIFO_CAP 32U
+#define USART1_IRQ_BIT     (1U << (37U - 32U))
+#define USART2_IRQ_BIT     (1U << (38U - 32U))
 #define UART4_IRQ_BIT      (1U << (52U - 32U))
+#define CARD_READER_DEFAULT_BAUD 9600U
 
 #define HSI_VALUE_HZ 8000000U
 
@@ -175,12 +191,105 @@ static void uart4_clear_status_errors(void)
     }
 }
 
+static void usart1_clear_status_errors(void)
+{
+    uint32_t i;
+    for (i = 0U; i < 16U; i++) {
+        uint32_t sr = USART1_SR;
+        if ((sr & USART_SR_RXNE) != 0U) {
+            (void)USART1_DR;
+            continue;
+        }
+        if ((sr & (USART_SR_ORE | USART_SR_FE | USART_SR_NE | USART_SR_PE)) != 0U) {
+            (void)USART1_DR;
+            continue;
+        }
+        break;
+    }
+}
+
+static void usart2_clear_status_errors(void)
+{
+    uint32_t i;
+    for (i = 0U; i < 16U; i++) {
+        uint32_t sr = USART2_SR;
+        if ((sr & USART_SR_RXNE) != 0U) {
+            (void)USART2_DR;
+            continue;
+        }
+        if ((sr & (USART_SR_ORE | USART_SR_FE | USART_SR_NE | USART_SR_PE)) != 0U) {
+            (void)USART2_DR;
+            continue;
+        }
+        break;
+    }
+}
+
 static uint8_t s_usart1_cn3_ready;
+static uint8_t s_usart2_rs485_ready;
 static uint8_t s_uart4_modem_ready;
 static uint8_t s_dbg_ready;
+static volatile uint8_t  s_uart1_rx_fifo[UART1_RX_FIFO_CAP];
+static volatile uint16_t s_uart1_rx_head;
+static volatile uint16_t s_uart1_rx_tail;
+static volatile uint8_t  s_uart2_rx_fifo[UART2_RX_FIFO_CAP];
+static volatile uint16_t s_uart2_rx_head;
+static volatile uint16_t s_uart2_rx_tail;
 static volatile uint8_t  s_uart4_rx_fifo[UART4_RX_FIFO_CAP];
 static volatile uint16_t s_uart4_rx_head;
 static volatile uint16_t s_uart4_rx_tail;
+
+static void uart1_fifo_reset(void)
+{
+    s_uart1_rx_head = 0U;
+    s_uart1_rx_tail = 0U;
+}
+
+static void uart1_fifo_push(uint8_t c)
+{
+    uint16_t next = (uint16_t)((s_uart1_rx_tail + 1U) % UART1_RX_FIFO_CAP);
+    if (next == s_uart1_rx_head) {
+        s_uart1_rx_head = (uint16_t)((s_uart1_rx_head + 1U) % UART1_RX_FIFO_CAP);
+    }
+    s_uart1_rx_fifo[s_uart1_rx_tail] = c;
+    s_uart1_rx_tail = next;
+}
+
+static int uart1_fifo_pop(uint8_t *out)
+{
+    if (out == NULL || s_uart1_rx_head == s_uart1_rx_tail) {
+        return 0;
+    }
+    *out = s_uart1_rx_fifo[s_uart1_rx_head];
+    s_uart1_rx_head = (uint16_t)((s_uart1_rx_head + 1U) % UART1_RX_FIFO_CAP);
+    return 1;
+}
+
+static void uart2_fifo_reset(void)
+{
+    s_uart2_rx_head = 0U;
+    s_uart2_rx_tail = 0U;
+}
+
+static void uart2_fifo_push(uint8_t c)
+{
+    uint16_t next = (uint16_t)((s_uart2_rx_tail + 1U) % UART2_RX_FIFO_CAP);
+    if (next == s_uart2_rx_head) {
+        s_uart2_rx_head = (uint16_t)((s_uart2_rx_head + 1U) % UART2_RX_FIFO_CAP);
+    }
+    s_uart2_rx_fifo[s_uart2_rx_tail] = c;
+    s_uart2_rx_tail = next;
+}
+
+static int uart2_fifo_pop(uint8_t *out)
+{
+    if (out == NULL || s_uart2_rx_head == s_uart2_rx_tail) {
+        return 0;
+    }
+    *out = s_uart2_rx_fifo[s_uart2_rx_head];
+    s_uart2_rx_head = (uint16_t)((s_uart2_rx_head + 1U) % UART2_RX_FIFO_CAP);
+    return 1;
+}
 
 static void uart4_fifo_reset(void)
 {
@@ -226,6 +335,15 @@ static void uart4_putc(uint8_t c)
     UART4_DR = (uint32_t)c;
 }
 
+static void usart2_putc(uint8_t c)
+{
+    uint32_t guard = USART_TX_SPIN_MAX;
+    while ((USART2_SR & USART_SR_TXE) == 0U && guard > 0U) {
+        guard--;
+    }
+    USART2_DR = (uint32_t)c;
+}
+
 static void uart5_putc(uint8_t c)
 {
     uint32_t guard = USART_TX_SPIN_MAX;
@@ -233,6 +351,24 @@ static void uart5_putc(uint8_t c)
         guard--;
     }
     UART5_DR = (uint32_t)c;
+}
+
+static void rs485_dir_set(uint8_t tx_enable)
+{
+    if (tx_enable != 0U) {
+        GPIOA_ODR |= (1U << BOARD_HW_PIN_RS485_DIR_PORT_A);
+    } else {
+        GPIOA_ODR &= ~(1U << BOARD_HW_PIN_RS485_DIR_PORT_A);
+    }
+}
+
+static void rs485_turnaround_delay(void)
+{
+    volatile uint32_t guard;
+
+    for (guard = 0U; guard < 256U; guard++) {
+        __asm volatile ("nop");
+    }
 }
 
 void bsp_uart_card_reader_init(void)
@@ -254,13 +390,62 @@ void bsp_uart_card_reader_init(void)
 
     USART1_CR1 = 0U;
 #if BOARD_CLOCK_LAO_CAO_HSI_8MHZ
-    USART1_BRR = USART_115200_8MHZ_BRR;
+    USART1_BRR = USART_9600_8MHZ_BRR;
 #else
-    USART1_BRR = usart_brr_from_kernel_hz(stm32f103_usart_apb2_kernel_hz(), 115200U);
+    USART1_BRR = usart_brr_from_kernel_hz(stm32f103_usart_apb2_kernel_hz(), CARD_READER_DEFAULT_BAUD);
 #endif
-    USART1_CR1 = USART_CR1_TE | USART_CR1_RE | USART_CR1_UE;
+    uart1_fifo_reset();
+    USART1_CR1 = USART_CR1_TE | USART_CR1_RE | USART_CR1_RXNEIE | USART_CR1_UE;
+    NVIC_ISER1 = USART1_IRQ_BIT;
+    usart1_clear_status_errors();
 
     s_usart1_cn3_ready = 1U;
+}
+
+void bsp_uart_rs485_init(uint32_t baud)
+{
+    uint32_t target = baud;
+
+    if (target == 0U) {
+        target = 9600U;
+    }
+
+    RCC_APB2ENR |= RCC_APB2ENR_IOPAEN;
+    RCC_APB1ENR |= RCC_APB1ENR_USART2EN;
+
+    {
+        uint32_t crl = GPIOA_CRL;
+
+        crl &= ~(0xFU << 4U);
+        crl |= (0x3U << 4U);
+        crl &= ~(0xFU << 8U);
+        crl |= (0xBU << 8U);
+        crl &= ~(0xFU << 12U);
+        crl |= (0x8U << 12U);
+        GPIOA_CRL = crl;
+    }
+    GPIOA_ODR |= (1U << BOARD_HW_PIN_USART2_RX_PORT_A);
+
+    rs485_dir_set(0U);
+    USART2_CR1 = 0U;
+#if BOARD_CLOCK_LAO_CAO_HSI_8MHZ
+    if (target == 2400U) {
+        USART2_BRR = USART_2400_8MHZ_BRR;
+    } else if (target == 9600U) {
+        USART2_BRR = USART_9600_8MHZ_BRR;
+    } else {
+        USART2_BRR = USART_115200_8MHZ_BRR;
+    }
+#else
+    USART2_BRR = usart_brr_from_kernel_hz(stm32f103_usart_apb1_kernel_hz(), target);
+#endif
+    uart2_fifo_reset();
+    USART2_CR1 = USART_CR1_TE | USART_CR1_RE | USART_CR1_RXNEIE |
+                 USART_CR1_M | USART_CR1_PCE | USART_CR1_UE;
+    NVIC_ISER1 = USART2_IRQ_BIT;
+    usart2_clear_status_errors();
+
+    s_usart2_rs485_ready = 1U;
 }
 
 void bsp_uart_modem_reapply_pins(void)
@@ -465,6 +650,24 @@ int bsp_uart_write(int port, const uint8_t *data, size_t len)
         }
         return (int)len;
     }
+    if (port == (int)BOARD_HW_UART_PORT_RS485) {
+        if (s_usart2_rs485_ready == 0U) {
+            bsp_uart_rs485_init(2400U);
+        }
+        rs485_dir_set(1U);
+        rs485_turnaround_delay();
+        for (size_t i = 0U; i < len; i++) {
+            usart2_putc(data[i]);
+        }
+        {
+            uint32_t guard = USART_TX_SPIN_MAX;
+            while ((USART2_SR & USART_SR_TC) == 0U && guard > 0U) {
+                guard--;
+            }
+        }
+        rs485_dir_set(0U);
+        return (int)len;
+    }
     if (port == (int)BOARD_HW_UART_PORT_MODEM_4G) {
         if (s_uart4_modem_ready == 0U) {
             bsp_uart_modem_init();
@@ -498,11 +701,24 @@ int bsp_uart_read(int port, uint8_t *buf, size_t cap)
 {
 #if defined(BOARD_STM32F103)
     if (port == (int)BOARD_HW_UART_PORT_CARD_READER && s_usart1_cn3_ready != 0U && cap > 0U && buf != NULL) {
-        if ((USART1_SR & USART_SR_RXNE) != 0U) {
-            buf[0] = (uint8_t)(USART1_DR & 0xFFU);
-            return 1;
+        size_t n = 0U;
+        uint32_t sr;
+        while (n < cap && uart1_fifo_pop(&buf[n]) != 0) {
+            n++;
         }
-        return 0;
+        while (n < cap) {
+            sr = USART1_SR;
+            if ((sr & USART_SR_RXNE) != 0U) {
+                buf[n++] = (uint8_t)(USART1_DR & 0xFFU);
+                continue;
+            }
+            if ((sr & (USART_SR_ORE | USART_SR_FE | USART_SR_NE | USART_SR_PE)) != 0U) {
+                (void)USART1_DR;
+                continue;
+            }
+            break;
+        }
+        return (int)n;
     }
     if (port == (int)BOARD_HW_UART_PORT_MODEM_4G && cap > 0U && buf != NULL) {
         uint32_t sr;
@@ -524,6 +740,30 @@ int bsp_uart_read(int port, uint8_t *buf, size_t cap)
         }
         return 0;
     }
+    if (port == (int)BOARD_HW_UART_PORT_RS485 && cap > 0U && buf != NULL) {
+        size_t n = 0U;
+        uint32_t sr;
+
+        if (s_usart2_rs485_ready == 0U) {
+            bsp_uart_rs485_init(2400U);
+        }
+        while (n < cap && uart2_fifo_pop(&buf[n]) != 0) {
+            n++;
+        }
+        while (n < cap) {
+            sr = USART2_SR;
+            if ((sr & USART_SR_RXNE) != 0U) {
+                buf[n++] = (uint8_t)(USART2_DR & 0xFFU);
+                continue;
+            }
+            if ((sr & (USART_SR_ORE | USART_SR_FE | USART_SR_NE | USART_SR_PE)) != 0U) {
+                (void)USART2_DR;
+                continue;
+            }
+            break;
+        }
+        return (int)n;
+    }
     if (port == (int)BOARD_HW_UART_PORT_DEBUG && s_dbg_ready != 0U && cap > 0U && buf != NULL) {
         if ((UART5_SR & USART_SR_RXNE) != 0U) {
             buf[0] = (uint8_t)(UART5_DR & 0xFFU);
@@ -536,6 +776,24 @@ int bsp_uart_read(int port, uint8_t *buf, size_t cap)
     (void)buf;
     (void)cap;
     return 0;
+}
+
+void USART2_IRQHandler(void)
+{
+    uint32_t sr;
+
+    for (;;) {
+        sr = USART2_SR;
+        if ((sr & USART_SR_RXNE) != 0U) {
+            uart2_fifo_push((uint8_t)(USART2_DR & 0xFFU));
+            continue;
+        }
+        if ((sr & (USART_SR_ORE | USART_SR_FE | USART_SR_NE | USART_SR_PE)) != 0U) {
+            (void)USART2_DR;
+            continue;
+        }
+        break;
+    }
 }
 
 void UART4_IRQHandler(void)
@@ -556,11 +814,34 @@ void UART4_IRQHandler(void)
     }
 }
 
+void USART1_IRQHandler(void)
+{
+    uint32_t sr;
+
+    for (;;) {
+        sr = USART1_SR;
+        if ((sr & USART_SR_RXNE) != 0U) {
+            uart1_fifo_push((uint8_t)(USART1_DR & 0xFFU));
+            continue;
+        }
+        if ((sr & (USART_SR_ORE | USART_SR_FE | USART_SR_NE | USART_SR_PE)) != 0U) {
+            (void)USART1_DR;
+            continue;
+        }
+        break;
+    }
+}
+
 #else
 
 void bsp_uart_card_reader_init(void) {}
 
 void bsp_uart_modem_init(void) {}
+
+void bsp_uart_rs485_init(uint32_t baud)
+{
+    (void)baud;
+}
 
 void bsp_uart_modem_set_brr(uint32_t brr)
 {

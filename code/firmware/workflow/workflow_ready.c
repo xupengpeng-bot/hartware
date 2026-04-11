@@ -15,7 +15,9 @@ bool workflow_ready_key_modules_ok(void)
     if (cfg == NULL) {
         return false;
     }
-    if (cfg->feature_modules.pump_vfd_control == 0U && cfg->feature_modules.single_valve_control == 0U) {
+    if (cfg->feature_modules.breaker_control == 0U &&
+        cfg->feature_modules.pump_direct_control == 0U &&
+        cfg->feature_modules.pump_vfd_control == 0U) {
         return false;
     }
     return true;

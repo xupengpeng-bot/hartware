@@ -57,16 +57,9 @@ uint8_t module_single_valve_query_values(void *out)
 
 uint8_t module_single_valve_execute_action(const char *action_code, const char *target_ref, const void *payload)
 {
+    (void)action_code;
     (void)target_ref;
     (void)payload;
-    if (str_eq(action_code, "open_valve")) {
-        s_st = VALVE_OPEN;
-        return 0U;
-    }
-    if (str_eq(action_code, "close_valve")) {
-        s_st = VALVE_CLOSED;
-        return 0U;
-    }
     return 1U;
 }
 

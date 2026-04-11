@@ -1,333 +1,305 @@
 #include "proto_query.h"
-#include "proto_codec_json.h"
-#include "proto_json_builder.h"
-#include "proto_envelope.h"
+
 #include "common_status.h"
-#include "workflow_engine.h"
-#include "workflow_card_reader.h"
-#include "workflow_local_access.h"
-#include "workflow_voice.h"
-#include "module_registry.h"
-#include "module_pressure.h"
-#include "module_flow.h"
+#include "config_store.h"
 #include "module_meter.h"
-#include "module_soil_moisture.h"
-#include "module_soil_temperature.h"
-#include "proto_ota.h"
+#include "proto_codec_json.h"
+#include "proto_command.h"
+#include "proto_envelope.h"
+#include "proto_json_builder.h"
+#include "runtime_state.h"
+
+#include "bsp_uart.h"
 #include "cJSON.h"
 
 #include <stdio.h>
 #include <string.h>
 
-static const char *ota_state_str(ota_state_t st)
+static void log_json_parse_failure(const char *tag, const char *json, size_t json_len)
 {
-    switch (st) {
-    case OTA_STATE_IDLE: return "IDLE";
-    case OTA_STATE_PRECHECKING: return "PRECHECKING";
-    case OTA_STATE_PRECHECK_FAILED: return "PRECHECK_FAILED";
-    case OTA_STATE_READY_TO_DOWNLOAD: return "READY_TO_DOWNLOAD";
-    case OTA_STATE_DOWNLOADING: return "DOWNLOADING";
-    case OTA_STATE_DOWNLOAD_FAILED: return "DOWNLOAD_FAILED";
-    case OTA_STATE_DOWNLOADED: return "DOWNLOADED";
-    case OTA_STATE_VERIFYING: return "VERIFYING";
-    case OTA_STATE_VERIFY_FAILED: return "VERIFY_FAILED";
-    case OTA_STATE_VERIFIED: return "VERIFIED";
-    case OTA_STATE_WRITING: return "WRITING";
-    case OTA_STATE_WRITE_FAILED: return "WRITE_FAILED";
-    case OTA_STATE_READY_TO_SWITCH: return "READY_TO_SWITCH";
-    case OTA_STATE_SWITCHING: return "SWITCHING";
-    case OTA_STATE_UPGRADED: return "UPGRADED";
-    case OTA_STATE_UPGRADE_FAILED: return "UPGRADE_FAILED";
-    case OTA_STATE_ROLLING_BACK: return "ROLLING_BACK";
-    case OTA_STATE_ROLLED_BACK: return "ROLLED_BACK";
-    default: return "UNKNOWN";
+    char ascii[65];
+    char hex[3 * 24 + 1];
+    char line[256];
+    const char *err_ptr;
+    size_t offset = 0U;
+    size_t dump_len;
+    size_t start;
+    size_t i;
+    size_t ascii_len;
+    size_t hex_pos = 0U;
+
+    if (json == NULL) {
+        return;
+    }
+
+    err_ptr = cJSON_GetErrorPtr();
+    if (err_ptr != NULL && err_ptr >= json) {
+        size_t candidate = (size_t)(err_ptr - json);
+        if (candidate <= json_len) {
+            offset = candidate;
+        }
+    }
+
+    start = offset > 12U ? (offset - 12U) : 0U;
+    dump_len = json_len - start;
+    if (dump_len > 24U) {
+        dump_len = 24U;
+    }
+
+    ascii_len = dump_len > (sizeof(ascii) - 1U) ? (sizeof(ascii) - 1U) : dump_len;
+    for (i = 0U; i < ascii_len; i++) {
+        unsigned char ch = (unsigned char)json[start + i];
+        ascii[i] = (ch >= 32U && ch <= 126U) ? (char)ch : '.';
+    }
+    ascii[ascii_len] = '\0';
+
+    for (i = 0U; i < dump_len && (hex_pos + 3U) < sizeof(hex); i++) {
+        unsigned char ch = (unsigned char)json[start + i];
+        int wrote = snprintf(hex + hex_pos, sizeof(hex) - hex_pos, "%02X", (unsigned)ch);
+        if (wrote <= 0) {
+            break;
+        }
+        hex_pos += (size_t)wrote;
+        if (i + 1U < dump_len && hex_pos + 1U < sizeof(hex)) {
+            hex[hex_pos++] = ' ';
+        }
+    }
+    hex[hex_pos] = '\0';
+
+    (void)snprintf(line, sizeof(line),
+                   "[PROTO] %s invalid json offset=%lu len=%lu slice=\"%s\" hex=%s\r\n",
+                   tag != NULL ? tag : "json",
+                   (unsigned long)offset,
+                   (unsigned long)json_len,
+                   ascii,
+                   hex);
+    bsp_debug_log(line);
+}
+
+static void read_optional_string(const cJSON *obj, const char *key, char *out, size_t out_cap)
+{
+    const cJSON *item;
+
+    if (out == NULL || out_cap == 0U) {
+        return;
+    }
+    out[0] = '\0';
+    if (obj == NULL || key == NULL) {
+        return;
+    }
+    item = cJSON_GetObjectItemCaseSensitive((cJSON *)obj, key);
+    if (cJSON_IsString(item) && item->valuestring != NULL) {
+        (void)snprintf(out, out_cap, "%s", item->valuestring);
     }
 }
 
-static const char *workflow_state_str(workflow_state_t st)
+static void read_optional_string_alias(const cJSON *obj, const char *primary_key, const char *alias_key,
+                                       char *out, size_t out_cap)
 {
-    switch (st) {
-    case WF_BOOTING: return "booting";
-    case WF_ONLINE_NOT_READY: return "online_not_ready";
-    case WF_READY_IDLE: return "ready_idle";
-    case WF_STARTING: return "starting";
-    case WF_RUNNING: return "running";
-    case WF_PAUSING: return "pausing";
-    case WF_PAUSED: return "paused";
-    case WF_RESUMING: return "resuming";
-    case WF_STOPPING: return "stopping";
-    case WF_STOPPED: return "stopped";
-    case WF_ERROR_STOP: return "error_stop";
-    default: return "unknown";
+    read_optional_string(obj, primary_key, out, out_cap);
+    if (out != NULL && out_cap > 0U && out[0] == '\0' && alias_key != NULL) {
+        read_optional_string(obj, alias_key, out, out_cap);
     }
 }
 
-static int add_channel_value(cJSON *arr, const char *module_code, const char *channel_code,
-                             const char *metric_code, double value, const char *unit, const char *quality)
+static int add_number_if_valid(cJSON *obj, const char *key, double value, uint8_t valid)
 {
-    cJSON *obj = cJSON_CreateObject();
-    if (obj == NULL) {
+    if (obj == NULL || key == NULL) {
         return -1;
     }
-    if (cJSON_AddStringToObject(obj, "module_code", module_code) == NULL ||
-        cJSON_AddStringToObject(obj, "channel_code", channel_code) == NULL ||
-        cJSON_AddStringToObject(obj, "metric_code", metric_code) == NULL ||
-        cJSON_AddNumberToObject(obj, "value", value) == NULL ||
-        ((unit != NULL) ? (cJSON_AddStringToObject(obj, "unit", unit) != NULL) : (cJSON_AddNullToObject(obj, "unit") != NULL)) == 0 ||
-        cJSON_AddStringToObject(obj, "quality", quality) == NULL) {
-        cJSON_Delete(obj);
-        return -1;
+    if (valid == 0U) {
+        return 0;
     }
-    cJSON_AddItemToArray(arr, obj);
-    return 0;
+    return cJSON_AddNumberToObject(obj, key, value) != NULL ? 0 : -1;
 }
 
-static int build_workflow_state_payload(cJSON *payload)
+static int add_string_if_nonempty(cJSON *obj, const char *key, const char *value)
 {
-    workflow_state_t st = workflow_engine_get_state();
-    device_runtime_t *rt = workflow_engine_runtime();
-    cJSON *obj = cJSON_CreateObject();
-    if (obj == NULL) {
+    if (obj == NULL || key == NULL || value == NULL || value[0] == '\0') {
         return -1;
     }
-    if (cJSON_AddStringToObject(obj, "workflow_state", workflow_state_str(st)) == NULL ||
-        cJSON_AddStringToObject(obj, "active_session_id", (rt && rt->active_session.session_id[0] != '\0') ? rt->active_session.session_id : "") == NULL ||
-        cJSON_AddNumberToObject(obj, "active_session_started_at_utc", (double)(rt ? rt->active_session.started_at_utc : 0U)) == NULL ||
-        cJSON_AddBoolToObject(obj, "recovery_pending", (rt && rt->recovery.recovery_pending) ? 1 : 0) == NULL ||
-        cJSON_AddBoolToObject(obj, "settlement_pending", (rt && rt->recovery.settlement_pending) ? 1 : 0) == NULL ||
-        cJSON_AddNumberToObject(obj, "stop_guard_remaining_ms", (double)workflow_engine_stop_guard_remaining_ms()) == NULL ||
-        cJSON_AddNumberToObject(obj, "last_stop_reason_code", (double)(rt ? rt->recovery.last_stop_reason_code : 0U)) == NULL ||
-        cJSON_AddNumberToObject(obj, "last_stop_at_utc", (double)(rt ? rt->recovery.last_stop_at_utc : 0U)) == NULL ||
-        cJSON_AddStringToObject(obj, "last_session_id", (rt && rt->recovery.last_session_id[0] != '\0') ? rt->recovery.last_session_id : "") == NULL ||
-        cJSON_AddNumberToObject(obj, "last_session_started_at_utc", (double)(rt ? rt->recovery.last_session_started_at_utc : 0U)) == NULL ||
-        cJSON_AddStringToObject(obj, "last_recovery_hint", (rt && rt->recovery.last_recovery_hint[0] != '\0') ? rt->recovery.last_recovery_hint : "") == NULL) {
-        cJSON_Delete(obj);
-        return -1;
+    return cJSON_AddStringToObject(obj, key, value) != NULL ? 0 : -1;
+}
+
+static const char *breaker_state_value(const runtime_state_t *rs)
+{
+    const device_config_t *cfg = config_store_active();
+
+    if (cfg == NULL || cfg->feature_modules.breaker_feedback_monitor == 0U) {
+        return NULL;
     }
-    cJSON_AddItemToObject(payload, "controller_state", obj);
-    return 0;
+    if (rs == NULL) {
+        return NULL;
+    }
+    return rs->pump_state == RUNTIME_PUMP_RUNNING ? "closed" : "opened";
+}
+
+static const char *meter_protocol_value(void)
+{
+    const device_config_t *cfg = config_store_active();
+
+    if (cfg == NULL || cfg->feature_modules.electric_meter_modbus == 0U) {
+        return NULL;
+    }
+    return module_meter_source_name();
+}
+
+static int build_query_nack(char *reply, size_t reply_cap, const char *corr, const char *session_ref,
+                            const char *reject_code, const char *reason)
+{
+    return proto_build_command_nack(reply, reply_cap,
+                                    corr != NULL && corr[0] != '\0' ? corr : NULL,
+                                    session_ref != NULL && session_ref[0] != '\0' ? session_ref : NULL,
+                                    corr != NULL && corr[0] != '\0' ? corr : "query",
+                                    "QUERY",
+                                    reject_code,
+                                    reason,
+                                    NULL);
 }
 
 int proto_query_handle(const char *json, size_t json_len, char *reply, size_t reply_cap)
 {
+    cJSON *root = NULL;
+    cJSON *payload = NULL;
     char corr[48];
     char session_ref[64];
-    char scope[24];
-    char qcode[48];
-    cJSON *payload;
+    char scope[16];
+    char qcode[16];
+    const runtime_state_t *rs;
+    const common_status_t *cs;
     int rc;
+
     (void)json_len;
 
-    if (!json || !reply || reply_cap < 64U) {
+    if (json == NULL || reply == NULL || reply_cap < 96U) {
         return -1;
     }
+
     corr[0] = '\0';
     session_ref[0] = '\0';
-    (void)proto_json_get_string(json, "correlation_id", corr, sizeof(corr));
-    (void)proto_json_get_string(json, "session_ref", session_ref, sizeof(session_ref));
-    if (session_ref[0] == '\0') {
-        (void)proto_json_get_string(json, "session_id", session_ref, sizeof(session_ref));
+    scope[0] = '\0';
+    qcode[0] = '\0';
+
+    root = cJSON_ParseWithLength(json, json_len);
+    if (root == NULL || !cJSON_IsObject(root)) {
+        if (root != NULL) {
+            cJSON_Delete(root);
+        }
+        log_json_parse_failure("QR", json, json_len);
+        return build_query_nack(reply, reply_cap, NULL, NULL, "PARAM_INVALID", "invalid json");
     }
-    if (proto_json_get_string(json, "scope", scope, sizeof(scope)) != 0) {
-        return -2;
-    }
-    if (proto_json_get_string(json, "query_code", qcode, sizeof(qcode)) != 0) {
-        return -3;
+    read_optional_string(root, "c", corr, sizeof(corr));
+    read_optional_string(root, "r", session_ref, sizeof(session_ref));
+
+    payload = cJSON_GetObjectItemCaseSensitive(root, "p");
+    if (!cJSON_IsObject(payload)) {
+        cJSON_Delete(root);
+        return build_query_nack(reply, reply_cap, corr, session_ref, "PARAM_INVALID", "bad query payload");
     }
 
-    payload = cJSON_CreateObject();
-    if (payload == NULL) {
-        return -4;
-    }
-    if (cJSON_AddStringToObject(payload, "scope", scope) == NULL ||
-        cJSON_AddStringToObject(payload, "query_code", qcode) == NULL) {
-        cJSON_Delete(payload);
-        return -4;
+    read_optional_string_alias(payload, "sc", "scope", scope, sizeof(scope));
+    read_optional_string_alias(payload, "qc", "query_code", qcode, sizeof(qcode));
+    if (scope[0] == '\0' || qcode[0] == '\0') {
+        cJSON_Delete(root);
+        return build_query_nack(reply, reply_cap, corr, session_ref, "PARAM_INVALID", "missing sc or qc");
     }
 
-    if (strcmp(scope, "workflow") == 0 && strcmp(qcode, "query_workflow_state") == 0) {
-        if (build_workflow_state_payload(payload) != 0) {
-            cJSON_Delete(payload);
-            return -4;
-        }
-    } else if (strcmp(scope, "workflow") == 0 && strcmp(qcode, "query_local_access_policy") == 0) {
-        workflow_local_access_policy_t policy;
-        cJSON *obj = cJSON_CreateObject();
-        workflow_local_access_get_policy(&policy);
-        if (obj == NULL ||
-            cJSON_AddStringToObject(obj, "mode", "card_or_local_token") == NULL ||
-            cJSON_AddNumberToObject(obj, "global_debounce_ms", (double)policy.global_debounce_ms) == NULL ||
-            cJSON_AddNumberToObject(obj, "same_token_debounce_ms", (double)policy.same_token_debounce_ms) == NULL ||
-            cJSON_AddNumberToObject(obj, "post_stop_drop_window_ms", (double)policy.post_stop_drop_window_ms) == NULL ||
-            cJSON_AddBoolToObject(obj, "active_token_bound", workflow_local_access_has_active_token()) == NULL) {
-            cJSON_Delete(obj);
-            cJSON_Delete(payload);
-            return -4;
-        }
-        cJSON_AddItemToObject(payload, "local_access", obj);
-    } else if (strcmp(scope, "workflow") == 0 && strcmp(qcode, "query_local_access_state") == 0) {
-        workflow_local_access_state_t state;
-        cJSON *obj = cJSON_CreateObject();
-        workflow_local_access_get_state(&state);
-        if (obj == NULL ||
-            cJSON_AddStringToObject(obj, "last_outcome", workflow_local_access_outcome_label(state.last_outcome)) == NULL ||
-            cJSON_AddStringToObject(obj, "last_reason", state.last_reason) == NULL ||
-            cJSON_AddStringToObject(obj, "last_source", state.last_source) == NULL ||
-            cJSON_AddStringToObject(obj, "last_session_id", state.last_session_id) == NULL ||
-            cJSON_AddNumberToObject(obj, "last_seen_at_ms", (double)state.last_seen_at_ms) == NULL ||
-            cJSON_AddNumberToObject(obj, "last_decision_at_ms", (double)state.last_decision_at_ms) == NULL ||
-            cJSON_AddBoolToObject(obj, "last_idempotent", state.last_idempotent) == NULL ||
-            cJSON_AddBoolToObject(obj, "active_token_bound", state.active_token_bound) == NULL) {
-            cJSON_Delete(obj);
-            cJSON_Delete(payload);
-            return -4;
-        }
-        cJSON_AddItemToObject(payload, "local_access_state", obj);
-    } else if (strcmp(scope, "workflow") == 0 && strcmp(qcode, "query_card_reader_state") == 0) {
-        workflow_card_reader_state_t state;
-        cJSON *obj = cJSON_CreateObject();
-        workflow_card_reader_get_state(&state);
-        if (obj == NULL ||
-            cJSON_AddStringToObject(obj, "mode", "platform_checkout_card_reader") == NULL ||
-            cJSON_AddBoolToObject(obj, "enabled", state.enabled) == NULL ||
-            cJSON_AddBoolToObject(obj, "supported", state.supported) == NULL ||
-            cJSON_AddNumberToObject(obj, "uart_port", (double)state.uart_port) == NULL ||
-            cJSON_AddNumberToObject(obj, "rx_buffered_bytes", (double)state.rx_buffered_bytes) == NULL ||
-            cJSON_AddNumberToObject(obj, "frames_ok", (double)state.frames_ok) == NULL ||
-            cJSON_AddNumberToObject(obj, "frames_invalid", (double)state.frames_invalid) == NULL ||
-            cJSON_AddNumberToObject(obj, "reports_sent", (double)state.reports_sent) == NULL ||
-            cJSON_AddNumberToObject(obj, "reports_failed", (double)state.reports_failed) == NULL ||
-            cJSON_AddNumberToObject(obj, "debounce_dropped", (double)state.debounce_dropped) == NULL ||
-            cJSON_AddNumberToObject(obj, "rejected_count", (double)state.rejected_count) == NULL ||
-            cJSON_AddStringToObject(obj, "last_outcome", state.last_outcome) == NULL ||
-            cJSON_AddStringToObject(obj, "last_reason", state.last_reason) == NULL ||
-            cJSON_AddStringToObject(obj, "last_source", state.last_source) == NULL ||
-            cJSON_AddStringToObject(obj, "last_token_suffix", state.last_token_suffix) == NULL ||
-            cJSON_AddNumberToObject(obj, "last_swipe_at_ms", (double)state.last_swipe_at_ms) == NULL ||
-            cJSON_AddNumberToObject(obj, "last_reported_at_ms", (double)state.last_reported_at_ms) == NULL) {
-            cJSON_Delete(obj);
-            cJSON_Delete(payload);
-            return -4;
-        }
-        cJSON_AddItemToObject(payload, "card_reader_state", obj);
-    } else if (strcmp(scope, "workflow") == 0 && strcmp(qcode, "query_voice_state") == 0) {
-        workflow_voice_state_t state;
-        cJSON *obj = cJSON_CreateObject();
-        workflow_voice_get_state(&state);
-        if (obj == NULL ||
-            cJSON_AddBoolToObject(obj, "enabled", state.enabled) == NULL ||
-            cJSON_AddBoolToObject(obj, "supported", state.supported) == NULL ||
-            cJSON_AddBoolToObject(obj, "busy", state.busy) == NULL ||
-            cJSON_AddNumberToObject(obj, "queue_depth", (double)state.queue_depth) == NULL ||
-            cJSON_AddStringToObject(obj, "last_prompt", state.last_prompt) == NULL ||
-            cJSON_AddStringToObject(obj, "last_source", state.last_source) == NULL ||
-            cJSON_AddNumberToObject(obj, "last_prompt_at_ms", (double)state.last_prompt_at_ms) == NULL) {
-            cJSON_Delete(obj);
-            cJSON_Delete(payload);
-            return -4;
-        }
-        cJSON_AddItemToObject(payload, "voice_state", obj);
-    } else if (strcmp(scope, "common") == 0 && strcmp(qcode, "query_upgrade_status") == 0) {
-        ota_upgrade_status_t s;
-        cJSON *obj = cJSON_CreateObject();
-        memset(&s, 0, sizeof(s));
-        (void)proto_ota_query_upgrade_status(&s);
-        if (obj == NULL ||
-            cJSON_AddStringToObject(obj, "ota_state", ota_state_str(s.ota_state)) == NULL ||
-            cJSON_AddStringToObject(obj, "target_version", s.target_version) == NULL ||
-            cJSON_AddStringToObject(obj, "current_version", s.current_version) == NULL ||
-            cJSON_AddStringToObject(obj, "package_sha256", s.package_sha256_hex) == NULL ||
-            cJSON_AddNumberToObject(obj, "download_progress_pct", (double)s.download_progress_pct) == NULL ||
-            cJSON_AddNumberToObject(obj, "write_progress_pct", (double)s.write_progress_pct) == NULL ||
-            cJSON_AddNumberToObject(obj, "last_result", (double)s.last_result) == NULL ||
-            cJSON_AddNumberToObject(obj, "last_error_code", (double)s.last_error_code) == NULL ||
-            cJSON_AddStringToObject(obj, "last_error_message", s.last_error_message) == NULL) {
-            cJSON_Delete(obj);
-            cJSON_Delete(payload);
-            return -4;
-        }
-        cJSON_AddItemToObject(payload, "upgrade_status", obj);
-    } else if (strcmp(scope, "common") == 0 && strcmp(qcode, "query_upgrade_capability") == 0) {
-        ota_upgrade_capability_t c;
-        cJSON *obj = cJSON_CreateObject();
-        memset(&c, 0, sizeof(c));
-        (void)proto_ota_query_upgrade_capability(&c);
-        if (obj == NULL ||
-            cJSON_AddBoolToObject(obj, "ota_supported", c.ota_supported) == NULL ||
-            cJSON_AddBoolToObject(obj, "dual_bank", c.dual_bank) == NULL ||
-            cJSON_AddStringToObject(obj, "package_formats", c.package_formats) == NULL ||
-            cJSON_AddStringToObject(obj, "compression_formats", c.compression_formats) == NULL ||
-            cJSON_AddNumberToObject(obj, "min_battery_soc_default", (double)c.min_battery_soc_default) == NULL ||
-            cJSON_AddNumberToObject(obj, "min_signal_csq_default", (double)c.min_signal_csq_default) == NULL) {
-            cJSON_Delete(obj);
-            cJSON_Delete(payload);
-            return -4;
-        }
-        cJSON_AddItemToObject(payload, "upgrade_capability", obj);
-    } else if (strcmp(scope, "common") == 0 && strcmp(qcode, "query_common_status") == 0) {
-        const common_status_t *cs = common_status_get();
-        cJSON *obj = cJSON_CreateObject();
-        if (obj == NULL ||
-            cJSON_AddBoolToObject(obj, "online", cs->online) == NULL ||
-            cJSON_AddBoolToObject(obj, "ready", cs->ready) == NULL ||
-            cJSON_AddNumberToObject(obj, "signal_csq", (double)cs->signal_csq) == NULL ||
-            cJSON_AddNumberToObject(obj, "battery_soc", (double)cs->battery_soc) == NULL ||
-            cJSON_AddNumberToObject(obj, "config_version", (double)cs->config_version) == NULL) {
-            cJSON_Delete(obj);
-            cJSON_Delete(payload);
-            return -4;
-        }
-        cJSON_AddItemToObject(payload, "common_status", obj);
-    } else if (strcmp(scope, "module") == 0) {
-        char mcode[48];
-        if (proto_json_get_string(json, "module_code", mcode, sizeof(mcode)) != 0) {
-            cJSON_AddStringToObject(payload, "error", "missing module_code");
-        } else {
-            const module_ops_t *m = module_registry_get(mcode);
-            if (m == NULL) {
-                cJSON_AddStringToObject(payload, "module_code", mcode);
-                cJSON_AddStringToObject(payload, "error", "unknown module");
-            } else {
-                cJSON *arr = cJSON_CreateArray();
-                if (arr == NULL) {
-                    cJSON_Delete(payload);
-                    return -4;
-                }
-                cJSON_AddStringToObject(payload, "module_code", mcode);
-                if (strcmp(mcode, "pressure_acquisition") == 0) {
-                    module_pressure_values_t v; memset(&v, 0, sizeof(v)); (void)m->query_values(&v);
-                    if (add_channel_value(arr, mcode, "pressure_1", "pressure_mpa", (double)v.pressure_mpa, "MPa", v.quality != 0U ? "good" : "bad") != 0) { cJSON_Delete(arr); cJSON_Delete(payload); return -4; }
-                } else if (strcmp(mcode, "flow_acquisition") == 0) {
-                    module_flow_values_t v; memset(&v, 0, sizeof(v)); (void)m->query_values(&v);
-                    if (add_channel_value(arr, mcode, "flow_1", "flow_m3h", (double)v.instant_m3h, "m3/h", "good") != 0 ||
-                        add_channel_value(arr, mcode, "flow_total", "total_m3", (double)v.total_m3, "m3", "good") != 0) { cJSON_Delete(arr); cJSON_Delete(payload); return -4; }
-                } else if (strcmp(mcode, "electric_meter_modbus") == 0) {
-                    module_meter_values_t v; memset(&v, 0, sizeof(v)); (void)m->query_values(&v);
-                    if (add_channel_value(arr, mcode, "meter_energy", "energy_kwh", (double)v.energy_kwh, "kWh", "good") != 0 ||
-                        add_channel_value(arr, mcode, "meter_power", "power_kw", (double)v.power_kw, "kW", "good") != 0 ||
-                        add_channel_value(arr, mcode, "meter_voltage", "voltage_v", (double)v.voltage_v, "V", "good") != 0 ||
-                        add_channel_value(arr, mcode, "meter_current", "current_a", (double)v.current_a, "A", "good") != 0) { cJSON_Delete(arr); cJSON_Delete(payload); return -4; }
-                } else if (strcmp(mcode, "soil_moisture_acquisition") == 0) {
-                    module_soil_moisture_values_t v; memset(&v, 0, sizeof(v)); (void)m->query_values(&v);
-                    if (add_channel_value(arr, mcode, "soil_moisture_1", "soil_moisture_vwc", (double)v.soil_moisture_vwc, NULL, "good") != 0) { cJSON_Delete(arr); cJSON_Delete(payload); return -4; }
-                } else if (strcmp(mcode, "soil_temperature_acquisition") == 0) {
-                    module_soil_temperature_values_t v; memset(&v, 0, sizeof(v)); (void)m->query_values(&v);
-                    if (add_channel_value(arr, mcode, "soil_temperature_1", "soil_temperature_c", (double)v.soil_temperature_c, "C", "good") != 0) { cJSON_Delete(arr); cJSON_Delete(payload); return -4; }
-                } else {
-                    cJSON_Delete(arr);
-                    cJSON_AddStringToObject(payload, "note", "no values serializer");
-                    arr = NULL;
-                }
-                if (arr != NULL) {
-                    cJSON_AddItemToObject(payload, "channel_values", arr);
-                }
-            }
-        }
-    } else {
-        cJSON_AddStringToObject(payload, "error", "unsupported_query");
+    rs = runtime_state_get();
+    cs = common_status_get();
+    if (rs == NULL || cs == NULL) {
+        cJSON_Delete(root);
+        return build_query_nack(reply, reply_cap, corr, session_ref, "DEVICE_BUSY", "runtime not ready");
     }
 
-    rc = proto_json_build_message(reply, reply_cap, PROTO_MSG_QUERY_RESULT, 0U,
-                                  corr, session_ref[0] ? session_ref : NULL, payload);
-    return rc < 0 ? -4 : rc;
+    if (strcmp(scope, "cm") == 0 && strcmp(qcode, "qcs") == 0) {
+        cJSON *out_payload = cJSON_CreateObject();
+        uint8_t signal_valid = (rs->signal_csq >= 0 && rs->signal_csq <= 99) ? 1U : 0U;
+        uint8_t battery_v_valid = (cs->battery_voltage_v >= 0.1f && cs->battery_voltage_v <= 64.0f) ? 1U : 0U;
+        uint8_t solar_v_valid = (cs->solar_voltage_v >= 0.0f && cs->solar_voltage_v <= 64.0f) ? 1U : 0U;
+        uint8_t battery_soc_valid = (battery_v_valid != 0U && rs->battery_soc <= 100U) ? 1U : 0U;
+
+        if (out_payload == NULL ||
+            cJSON_AddNumberToObject(out_payload, "rd", rs->ready ? 1.0 : 0.0) == NULL ||
+            cJSON_AddNumberToObject(out_payload, "on", rs->online ? 1.0 : 0.0) == NULL ||
+            cJSON_AddNumberToObject(out_payload, "tc", rs->tcp_connected ? 1.0 : 0.0) == NULL ||
+            cJSON_AddStringToObject(out_payload, "wf",
+                                    proto_map_workflow_short_from_runtime(runtime_state_workflow_name(rs->workflow_state),
+                                                                          rs->ready ? 1U : 0U)) == NULL ||
+            cJSON_AddNumberToObject(out_payload, "rt", (double)rs->runtime_sec) == NULL ||
+            cJSON_AddNumberToObject(out_payload, "me", (double)rs->meter_epoch) == NULL ||
+            add_number_if_valid(out_payload, "csq", (double)rs->signal_csq, signal_valid) != 0 ||
+            add_number_if_valid(out_payload, "bs", (double)rs->battery_soc, battery_soc_valid) != 0 ||
+            add_number_if_valid(out_payload, "bv", (double)cs->battery_voltage_v, battery_v_valid) != 0 ||
+            add_number_if_valid(out_payload, "sv", (double)cs->solar_voltage_v, solar_v_valid) != 0 ||
+            cJSON_AddNumberToObject(out_payload, "cv", (double)rs->config_version) == NULL ||
+            cJSON_AddStringToObject(out_payload, "pm",
+                                    proto_map_power_mode_short(runtime_state_power_name(rs->power_state))) == NULL ||
+            add_number_if_valid(out_payload, "fq", (double)rs->total_m3,
+                                (uint8_t)(rs->total_m3 >= 0.0f && rs->total_m3 <= 10000000.0f)) != 0 ||
+            add_number_if_valid(out_payload, "ek", (double)rs->energy_kwh,
+                                (uint8_t)(rs->energy_kwh >= 0.0f && rs->energy_kwh <= 10000000.0f)) != 0 ||
+            (breaker_state_value(rs) != NULL &&
+             add_string_if_nonempty(out_payload, "brs", breaker_state_value(rs)) != 0)) {
+            cJSON_Delete(root);
+            cJSON_Delete(out_payload);
+            return build_query_nack(reply, reply_cap, corr, session_ref, "DEVICE_BUSY", "build qcs failed");
+        }
+        rc = proto_json_build_message(reply, reply_cap, PROTO_MSG_QUERY_RESULT, 0U,
+                                      corr[0] != '\0' ? corr : NULL,
+                                      session_ref[0] != '\0' ? session_ref : NULL,
+                                      out_payload);
+        cJSON_Delete(root);
+        return rc >= 0 ? rc : build_query_nack(reply, reply_cap, corr, session_ref, "DEVICE_BUSY", "send qcs failed");
+    }
+
+    if (strcmp(scope, "wf") == 0 && strcmp(qcode, "qwf") == 0) {
+        cJSON *out_payload = cJSON_CreateObject();
+
+        if (out_payload == NULL ||
+            cJSON_AddStringToObject(out_payload, "wf",
+                                    proto_map_workflow_short_from_runtime(runtime_state_workflow_name(rs->workflow_state),
+                                                                          rs->ready ? 1U : 0U)) == NULL) {
+            cJSON_Delete(root);
+            cJSON_Delete(out_payload);
+            return build_query_nack(reply, reply_cap, corr, session_ref, "DEVICE_BUSY", "build qwf failed");
+        }
+        rc = proto_json_build_message(reply, reply_cap, PROTO_MSG_QUERY_RESULT, 0U,
+                                      corr[0] != '\0' ? corr : NULL,
+                                      session_ref[0] != '\0' ? session_ref : NULL,
+                                      out_payload);
+        cJSON_Delete(root);
+        return rc >= 0 ? rc : build_query_nack(reply, reply_cap, corr, session_ref, "DEVICE_BUSY", "send qwf failed");
+    }
+
+    if (strcmp(scope, "cm") == 0 && strcmp(qcode, "qem") == 0) {
+        cJSON *out_payload = cJSON_CreateObject();
+        uint8_t meter_valid = (rs->meter_last.valid != 0U) ? 1U : 0U;
+
+        if (out_payload == NULL ||
+            meter_valid == 0U ||
+            (meter_protocol_value() != NULL &&
+             add_string_if_nonempty(out_payload, "mp", meter_protocol_value()) != 0) ||
+            cJSON_AddNumberToObject(out_payload, "me", (double)rs->meter_epoch) == NULL ||
+            add_number_if_valid(out_payload, "vv", (double)rs->voltage_v,
+                                (uint8_t)(rs->voltage_v >= 0.0f && rs->voltage_v <= 1000.0f)) != 0 ||
+            add_number_if_valid(out_payload, "ia", (double)rs->current_a,
+                                (uint8_t)(rs->current_a >= 0.0f && rs->current_a <= 1000.0f)) != 0 ||
+            add_number_if_valid(out_payload, "pw", (double)rs->power_kw,
+                                (uint8_t)(rs->power_kw >= 0.0f && rs->power_kw <= 500.0f)) != 0 ||
+            add_number_if_valid(out_payload, "ek", (double)rs->energy_kwh,
+                                (uint8_t)(rs->energy_kwh >= 0.0f && rs->energy_kwh <= 10000000.0f)) != 0) {
+            cJSON_Delete(root);
+            cJSON_Delete(out_payload);
+            return build_query_nack(reply, reply_cap, corr, session_ref, "DEVICE_BUSY", "build qem failed");
+        }
+        rc = proto_json_build_message(reply, reply_cap, PROTO_MSG_QUERY_RESULT, 0U,
+                                      corr[0] != '\0' ? corr : NULL,
+                                      session_ref[0] != '\0' ? session_ref : NULL,
+                                      out_payload);
+        cJSON_Delete(root);
+        return rc >= 0 ? rc : build_query_nack(reply, reply_cap, corr, session_ref, "DEVICE_BUSY", "send qem failed");
+    }
+
+    cJSON_Delete(root);
+    return build_query_nack(reply, reply_cap, corr, session_ref, "UNSUPPORTED_COMMAND", "unsupported query");
 }

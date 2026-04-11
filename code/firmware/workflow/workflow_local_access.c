@@ -123,22 +123,20 @@ static void workflow_local_access_emit_event(const char *event_code,
                                              const char *session_ref,
                                              bool        idempotent)
 {
-    char safe_source[WORKFLOW_LOCAL_ACCESS_SOURCE_LEN];
     char safe_reason[WORKFLOW_LOCAL_ACCESS_REASON_LEN];
+    char safe_event[8];
 
-    workflow_local_access_copy_symbol(safe_source, sizeof(safe_source), source_code);
     workflow_local_access_copy_symbol(safe_reason, sizeof(safe_reason), reason);
-    (void)proto_event_report_sendf(session_ref, event_code,
-                                   "\"access_source\":\"%s\","
-                                   "\"access_reason\":\"%s\","
-                                   "\"idempotent\":%s,"
-                                   "\"active_token_bound\":%s,"
-                                   "\"workflow_state\":\"%s\"",
-                                   safe_source[0] != '\0' ? safe_source : "local_token",
-                                   safe_reason,
-                                   idempotent ? "true" : "false",
-                                   workflow_local_access_has_active_token() ? "true" : "false",
-                                   workflow_control_state_label(workflow_engine_get_state()));
+    if (event_code != NULL && strcmp(event_code, "local_access_start_accepted") == 0) {
+        (void)snprintf(safe_event, sizeof(safe_event), "%s", "lsa");
+    } else if (event_code != NULL && strcmp(event_code, "local_access_stop_accepted") == 0) {
+        (void)snprintf(safe_event, sizeof(safe_event), "%s", "lss");
+    } else {
+        (void)snprintf(safe_event, sizeof(safe_event), "%s", "lar");
+    }
+    (void)source_code;
+    (void)idempotent;
+    (void)proto_event_report_send_min(session_ref, safe_event, safe_reason, NULL, "pump_1");
 }
 
 static void workflow_local_access_emit_voice_prompt(workflow_local_access_decision_t decision)

@@ -10,6 +10,7 @@ int bsp_uart_write(int port, const uint8_t *data, size_t len);
 int bsp_uart_read(int port, uint8_t *buf, size_t cap);
 
 void bsp_uart_modem_init(void);
+void bsp_uart_rs485_init(uint32_t baud);
 
 /** 仅 UART4：直接写 BRR 寄存器。 */
 void bsp_uart_modem_set_brr(uint32_t brr);

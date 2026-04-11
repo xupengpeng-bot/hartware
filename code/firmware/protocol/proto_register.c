@@ -1,135 +1,213 @@
 #include "proto_register.h"
-#include "proto_json_builder.h"
-#include "proto_envelope.h"
-#include "common_identity.h"
-#include "storage_config.h"
-#include "cJSON.h"
 
+#include "common_identity.h"
+#include "config_store.h"
+#include "module_meter.h"
+#include "proto_codec_json.h"
+#include "proto_envelope.h"
+
+#include <stddef.h>
 #include <string.h>
 
-static int require_nonempty_field(const char *value)
+typedef struct {
+    const char *module_code;
+    size_t field_offset;
+} capability_desc_t;
+
+static const capability_desc_t s_capability_defs[] = {
+    { "pump_vfd_control",      offsetof(feature_modules_t, pump_vfd_control) },
+    { "pump_direct_control",   offsetof(feature_modules_t, pump_direct_control) },
+    { "single_valve_control",  offsetof(feature_modules_t, single_valve_control) },
+    { "pressure_acquisition",  offsetof(feature_modules_t, pressure_acquisition) },
+    { "flow_acquisition",      offsetof(feature_modules_t, flow_acquisition) },
+    { "soil_moisture_acquisition", offsetof(feature_modules_t, soil_moisture_acquisition) },
+    { "soil_temperature_acquisition", offsetof(feature_modules_t, soil_temperature_acquisition) },
+    { "power_monitoring",      offsetof(feature_modules_t, power_monitoring) },
+    { "payment_qr_control",    offsetof(feature_modules_t, payment_qr_control) },
+    { "card_auth_reader",      offsetof(feature_modules_t, card_auth_reader) },
+    { "electric_meter_modbus", offsetof(feature_modules_t, electric_meter_modbus) },
+    { "valve_feedback_monitor", offsetof(feature_modules_t, valve_feedback_monitor) },
+    { "breaker_control",       offsetof(feature_modules_t, breaker_control) },
+    { "breaker_feedback_monitor", offsetof(feature_modules_t, breaker_feedback_monitor) },
+    { "rs485_sensor_gateway",  offsetof(feature_modules_t, rs485_sensor_gateway) },
+    { "rs485_vfd_gateway",     offsetof(feature_modules_t, rs485_vfd_gateway) },
+    { "remote_start_enable",   offsetof(feature_modules_t, remote_start_enable) },
+    { "auto_linkage_enable",   offsetof(feature_modules_t, auto_linkage_enable) },
+    { "auto_stop_on_low_pressure", offsetof(feature_modules_t, auto_stop_on_low_pressure) },
+    { "auto_stop_on_high_pressure", offsetof(feature_modules_t, auto_stop_on_high_pressure) }
+};
+
+static int append_string_field(json_buf_t *jb, const char *key, const char *value, uint8_t *first)
 {
-    return (value != NULL && value[0] != '\0') ? 0 : -1;
+    if (jb == NULL || key == NULL || value == NULL || first == NULL) {
+        return -1;
+    }
+    if (*first == 0U && json_buf_append(jb, ",") != 0) {
+        return -1;
+    }
+    *first = 0U;
+    if (json_buf_append(jb, "\"") != 0 ||
+        json_buf_append(jb, key) != 0 ||
+        json_buf_append(jb, "\":\"") != 0 ||
+        json_escape_append(jb, value) != 0 ||
+        json_buf_append(jb, "\"") != 0) {
+        return -1;
+    }
+    return 0;
 }
 
-static cJSON *build_resource_inventory_json(const resource_inventory_t *ri)
+static int append_u32_field(json_buf_t *jb, const char *key, uint32_t value, uint8_t *first)
 {
-    cJSON *obj = cJSON_CreateObject();
-    if (obj == NULL) {
-        return NULL;
+    if (jb == NULL || key == NULL || first == NULL) {
+        return -1;
     }
-    if (cJSON_AddNumberToObject(obj, "ai_count", (double)ri->ai_count) == NULL ||
-        cJSON_AddNumberToObject(obj, "di_count", (double)ri->di_count) == NULL ||
-        cJSON_AddNumberToObject(obj, "do_count", (double)ri->do_count) == NULL ||
-        cJSON_AddNumberToObject(obj, "rs485_count", (double)ri->rs485_count) == NULL ||
-        cJSON_AddNumberToObject(obj, "relay_count", (double)ri->relay_count) == NULL ||
-        cJSON_AddNumberToObject(obj, "pulse_count", (double)ri->pulse_count) == NULL ||
-        cJSON_AddNumberToObject(obj, "battery_monitor", (double)ri->battery_monitor) == NULL ||
-        cJSON_AddNumberToObject(obj, "solar_monitor", (double)ri->solar_monitor) == NULL ||
-        cJSON_AddNumberToObject(obj, "signal_monitor", (double)ri->signal_monitor) == NULL) {
-        cJSON_Delete(obj);
-        return NULL;
+    if (*first == 0U && json_buf_append(jb, ",") != 0) {
+        return -1;
     }
-    return obj;
+    *first = 0U;
+    return json_buf_append_fmt(jb, "\"%s\":%lu", key, (unsigned long)value);
 }
 
-static cJSON *build_feature_modules_json(const feature_modules_t *fm)
+static void fill_default_feature_modules(feature_modules_t *fm)
 {
-    cJSON *arr = cJSON_CreateArray();
-    if (arr == NULL) {
+    if (fm == NULL) {
+        return;
+    }
+    memset(fm, 0, sizeof(*fm));
+    fm->payment_qr_control = 1U;
+    fm->card_auth_reader = 1U;
+    fm->electric_meter_modbus = 1U;
+    fm->breaker_control = 1U;
+}
+
+static void filter_real_feature_modules(feature_modules_t *dst, const feature_modules_t *src)
+{
+    if (dst == NULL) {
+        return;
+    }
+    if (src == NULL) {
+        memset(dst, 0, sizeof(*dst));
+        return;
+    }
+    *dst = *src;
+}
+
+static const char *register_meter_protocol(const feature_modules_t *fm)
+{
+    if (fm == NULL || fm->electric_meter_modbus == 0U) {
         return NULL;
     }
-#define APPEND_MODULE(enabled, code) \
-    do { \
-        if ((enabled) != 0U) { \
-            cJSON *it = cJSON_CreateString((code)); \
-            if (it == NULL) { cJSON_Delete(arr); return NULL; } \
-            cJSON_AddItemToArray(arr, it); \
-        } \
-    } while (0)
-    APPEND_MODULE(fm->pump_vfd_control, "pump_vfd_control");
-    APPEND_MODULE(fm->single_valve_control, "single_valve_control");
-    APPEND_MODULE(fm->pressure_acquisition, "pressure_acquisition");
-    APPEND_MODULE(fm->flow_acquisition, "flow_acquisition");
-    APPEND_MODULE(fm->electric_meter_modbus, "electric_meter_modbus");
-    APPEND_MODULE(fm->soil_moisture_acquisition, "soil_moisture_acquisition");
-    APPEND_MODULE(fm->soil_temperature_acquisition, "soil_temperature_acquisition");
-    APPEND_MODULE(fm->liquid_level_acquisition, "liquid_level_acquisition");
-    APPEND_MODULE(fm->remote_io_extension, "remote_io_extension");
-#undef APPEND_MODULE
-    return arr;
+    return module_meter_source_name();
+}
+
+static const char *register_control_protocol(const device_config_t *cfg, const feature_modules_t *fm)
+{
+    if (cfg == NULL || fm == NULL || fm->breaker_control == 0U) {
+        return NULL;
+    }
+    switch (cfg->control_config.pump_control_mode) {
+    case PUMP_CONTROL_METER_BREAKER_485:
+        return register_meter_protocol(fm);
+    case PUMP_CONTROL_CONTACTOR_DIRECT:
+        return "contactor_direct";
+    case PUMP_CONTROL_RELAY_DIRECT:
+    default:
+        return "relay_direct";
+    }
+}
+
+static uint8_t feature_enabled(const feature_modules_t *fm, size_t field_offset)
+{
+    const uint8_t *base;
+
+    if (fm == NULL) {
+        return 0U;
+    }
+    base = (const uint8_t *)fm;
+    return *(const uint8_t *)(base + field_offset) != 0U ? 1U : 0U;
+}
+
+static int append_feature_modules(json_buf_t *jb, const feature_modules_t *fm, uint8_t *first)
+{
+    uint8_t emitted = 0U;
+    size_t i;
+
+    if (jb == NULL || fm == NULL || first == NULL) {
+        return -1;
+    }
+    if (*first == 0U && json_buf_append(jb, ",") != 0) {
+        return -1;
+    }
+    *first = 0U;
+    if (json_buf_append(jb, "\"fm\":[") != 0) {
+        return -1;
+    }
+    for (i = 0U; i < sizeof(s_capability_defs) / sizeof(s_capability_defs[0]); i++) {
+        if (feature_enabled(fm, s_capability_defs[i].field_offset) == 0U) {
+            continue;
+        }
+        if (emitted != 0U && json_buf_append(jb, ",") != 0) {
+            return -1;
+        }
+        emitted = 1U;
+        if (json_buf_append(jb, "\"") != 0 ||
+            json_buf_append(jb, proto_map_module_short(s_capability_defs[i].module_code)) != 0 ||
+            json_buf_append(jb, "\"") != 0) {
+            return -1;
+        }
+    }
+    return json_buf_append(jb, "]");
 }
 
 int proto_register_build(char *buf, size_t cap)
 {
-    uint32_t cv = 0U;
-    int tzq = MODEL_DEFAULT_TIME_ZONE_QUARTER_HOURS;
-    feature_modules_t fm;
-    const device_config_t *cfg;
+    json_buf_t jb;
     const controller_identity_t *id;
-    const resource_inventory_t *ri;
-    cJSON *payload = NULL;
-    cJSON *identity = NULL;
-    cJSON *inventory = NULL;
-    cJSON *features = NULL;
-    int rc;
+    const device_config_t *cfg;
+    feature_modules_t fm;
+    uint32_t config_version = 1U;
+    uint8_t first = 1U;
 
     if (buf == NULL || cap < 512U) {
         return -1;
     }
-    memset(&fm, 0, sizeof(fm));
-    cfg = storage_config_active();
-    if (cfg != NULL) {
-        cv = cfg->config_version;
-        fm = cfg->feature_modules;
-        if (cfg->time_zone_quarter_hours >= -48 && cfg->time_zone_quarter_hours <= 56) {
-            tzq = cfg->time_zone_quarter_hours;
-        }
-    }
+
     id = common_identity_get();
-    ri = common_resource_inventory_get();
-    if (id == NULL || ri == NULL) {
+    cfg = config_store_active();
+    if (id == NULL) {
         return -2;
     }
-    if (require_nonempty_field(id->iccid) != 0 || require_nonempty_field(id->imei) != 0 ||
-        require_nonempty_field(id->hardware_sku) != 0 || require_nonempty_field(id->hardware_rev) != 0 ||
-        require_nonempty_field(id->firmware_family) != 0 || require_nonempty_field(id->firmware_version) != 0) {
+
+    fill_default_feature_modules(&fm);
+    if (cfg != NULL) {
+        filter_real_feature_modules(&fm, &cfg->feature_modules);
+        config_version = cfg->config_version;
+    }
+
+    json_buf_init(&jb, buf, cap);
+    if (proto_envelope_append_payload_prefix(&jb, PROTO_MSG_REGISTER, 0U, NULL, NULL) != 0) {
         return -3;
     }
 
-    payload = cJSON_CreateObject();
-    identity = cJSON_CreateObject();
-    inventory = build_resource_inventory_json(ri);
-    features = build_feature_modules_json(&fm);
-    if (payload == NULL || identity == NULL || inventory == NULL || features == NULL) {
-        cJSON_Delete(payload);
-        cJSON_Delete(identity);
-        cJSON_Delete(inventory);
-        cJSON_Delete(features);
+    if (append_string_field(&jb, "hs", id->hardware_sku, &first) != 0 ||
+        append_string_field(&jb, "hr", id->hardware_rev, &first) != 0 ||
+        append_string_field(&jb, "ff", id->firmware_family, &first) != 0 ||
+        append_string_field(&jb, "fv", id->firmware_version, &first) != 0 ||
+        append_u32_field(&jb, "cv", config_version, &first) != 0 ||
+        append_feature_modules(&jb, &fm, &first) != 0) {
+        return -4;
+    }
+    if (register_meter_protocol(&fm) != NULL &&
+        append_string_field(&jb, "mp", register_meter_protocol(&fm), &first) != 0) {
+        return -4;
+    }
+    if (register_control_protocol(cfg, &fm) != NULL &&
+        append_string_field(&jb, "cp", register_control_protocol(cfg, &fm), &first) != 0) {
         return -4;
     }
 
-    if (cJSON_AddStringToObject(identity, "iccid", id->iccid) == NULL ||
-        cJSON_AddStringToObject(identity, "hardware_sku", id->hardware_sku) == NULL ||
-        cJSON_AddStringToObject(identity, "hardware_rev", id->hardware_rev) == NULL ||
-        cJSON_AddStringToObject(identity, "firmware_family", id->firmware_family) == NULL ||
-        cJSON_AddStringToObject(identity, "firmware_version", id->firmware_version) == NULL) {
-        cJSON_Delete(payload);
-        cJSON_Delete(identity);
-        cJSON_Delete(inventory);
-        cJSON_Delete(features);
+    if (proto_envelope_close_payload(&jb) != 0) {
         return -5;
     }
-
-    cJSON_AddItemToObject(payload, "identity", identity);
-    cJSON_AddNumberToObject(payload, "config_version", (double)cv);
-    cJSON_AddNumberToObject(payload, "time_zone_quarter_hours", (double)tzq);
-    cJSON_AddItemToObject(payload, "resource_inventory", inventory);
-    cJSON_AddItemToObject(payload, "feature_modules", features);
-
-    rc = proto_json_build_message(buf, cap, PROTO_MSG_REGISTER, 0U, NULL, NULL, payload);
-    if (rc < 0) {
-        return rc;
-    }
-    return rc;
+    return (int)jb.len;
 }

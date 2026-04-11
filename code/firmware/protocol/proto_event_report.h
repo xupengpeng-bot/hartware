@@ -1,13 +1,19 @@
 #ifndef PROTO_EVENT_REPORT_H
 #define PROTO_EVENT_REPORT_H
 
-#include <stddef.h>
+#include <stdint.h>
 
-/** Build EVENT_REPORT with arbitrary JSON object body (without outer braces for payload fields). */
-int proto_event_report_build(char *buf, size_t cap, const char *session_ref, const char *event_code,
-                             const char *payload_fields_json);
+int proto_event_report_send_min(const char *session_ref,
+                                const char *event_code,
+                                const char *reject_code,
+                                const char *message,
+                                const char *target_ref);
 
-/** Format payload fields into a shared scratch buffer, build EVENT_REPORT, then send it. */
-int proto_event_report_sendf(const char *session_ref, const char *event_code, const char *payload_fields_fmt, ...);
+int proto_event_report_send_counter_reset(const char *session_ref,
+                                          const char *reason_code,
+                                          uint32_t meter_epoch,
+                                          uint32_t runtime_sec,
+                                          float total_m3,
+                                          float energy_kwh);
 
 #endif /* PROTO_EVENT_REPORT_H */

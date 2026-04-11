@@ -4,6 +4,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
+typedef struct {
+    uint32_t conn_age_ms;
+    uint32_t idle_ms;
+    size_t   last_tx_len;
+    char     reason[24];
+    char     last_tx_type[32];
+} net_disconnect_diag_t;
+
 void net_connectivity_init(void);
 void net_connectivity_poll(uint32_t monotonic_ms);
 
@@ -15,5 +23,6 @@ void net_connectivity_force_reconnect(void);
 
 void net_connectivity_on_register_ack(void);
 void net_connectivity_on_register_nack(void);
+void net_connectivity_get_last_disconnect_diag(net_disconnect_diag_t *out);
 
 #endif /* NET_CONNECTIVITY_H */

@@ -4,10 +4,10 @@
 
 #include <stddef.h>
 
-static bool stub_tcp_ok(void *user)
+static bool read_tcp_ok(void *user)
 {
     (void)user;
-    return true;
+    return common_status_get()->tcp_connected;
 }
 
 static int read_battery_soc(uint8_t *out_pct, void *user)
@@ -21,30 +21,31 @@ static int read_battery_soc(uint8_t *out_pct, void *user)
     return 0;
 }
 
-static int stub_csq(int16_t *out_csq, void *user)
+static int read_signal_csq(int16_t *out_csq, void *user)
 {
     (void)user;
     if (!out_csq) {
         return -1;
     }
-    *out_csq = 18;
+    *out_csq = common_status_get()->signal_csq;
     return 0;
 }
 
-static int stub_free(uint32_t *out_free, void *user)
+static int read_storage_free_bytes(uint32_t *out_free, void *user)
 {
     (void)user;
     if (!out_free) {
         return -1;
     }
-    *out_free = 16U * 1024U * 1024U;
+    /* Upgrade storage is not wired yet; report unavailable instead of a fake large capacity. */
+    *out_free = 0U;
     return 0;
 }
 
 static const ota_port_t s_port = {
-    .tcp_session_stable  = stub_tcp_ok,
+    .tcp_session_stable  = read_tcp_ok,
     .get_battery_soc     = read_battery_soc,
-    .get_signal_csq      = stub_csq,
+    .get_signal_csq      = read_signal_csq,
     .http_download_chunk = NULL,
     .sha256_init         = NULL,
     .sha256_update       = NULL,
@@ -53,7 +54,7 @@ static const ota_port_t s_port = {
     .flash_erase_upgrade_region = NULL,
     .flash_write_upgrade_region = NULL,
     .reboot_to_new_image = NULL,
-    .storage_free_bytes  = stub_free,
+    .storage_free_bytes  = read_storage_free_bytes,
     .user                = NULL,
 };
 

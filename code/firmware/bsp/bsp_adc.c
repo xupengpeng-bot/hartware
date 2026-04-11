@@ -18,8 +18,14 @@
 #define BAT_VREF_MV       3300U
 #define BAT_ADC_MAX       4095U
 
-#define BAT_EMPTY_MV      10500U
-#define BAT_FULL_MV       16800U
+/*
+ * Battery SOC calibration for the deployed 2S pack:
+ * - 8.4V = 100%
+ * - 7.2V = 0%
+ * We keep the voltage telemetry untouched and only remap the percentage.
+ */
+#define BAT_EMPTY_MV      7200U
+#define BAT_FULL_MV       8400U
 
 #if defined(BOARD_STM32F103)
 
@@ -172,8 +178,8 @@ void bsp_adc_init(void)
 
 uint16_t bsp_adc_read_battery_raw(void)
 {
-    /* Host simulation: about 12.6V battery through the ACC divider. */
-    return 3880U;
+    /* Host simulation: about 8.4V battery through the ACC divider. */
+    return 2600U;
 }
 
 #endif /* BOARD_STM32F103 */

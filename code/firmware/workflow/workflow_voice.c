@@ -48,9 +48,17 @@ static void workflow_voice_queue_push(const char *prompt_code, const char *sourc
 {
     workflow_voice_queue_item_t *item;
     uint8_t                      slot;
+    uint8_t                      idx;
 
     if (!prompt_code || prompt_code[0] == '\0') {
         return;
+    }
+
+    for (idx = 0U; idx < s_queue_len; ++idx) {
+        workflow_voice_queue_item_t *queued = &s_queue[(uint8_t)((s_queue_head + idx) % WORKFLOW_VOICE_QUEUE_CAP)];
+        if (strcmp(queued->prompt, prompt_code) == 0) {
+            return;
+        }
     }
 
     if (s_queue_len >= WORKFLOW_VOICE_QUEUE_CAP) {
@@ -95,13 +103,14 @@ void workflow_voice_init(void)
 void workflow_voice_tick(uint32_t now_ms)
 {
     workflow_voice_queue_item_t item;
+    int                         rc;
 
     s_now_ms = now_ms;
     s_state.supported = bsp_voice_supported();
     s_state.busy = workflow_voice_is_busy();
     s_state.queue_depth = s_queue_len;
 
-    if (workflow_voice_is_busy()) {
+    if ((s_busy_until_ms != 0U && (int32_t)(s_busy_until_ms - s_now_ms) > 0)) {
         return;
     }
 
@@ -109,7 +118,11 @@ void workflow_voice_tick(uint32_t now_ms)
         return;
     }
 
-    (void)bsp_voice_play_prompt(item.prompt);
+    rc = bsp_voice_play_prompt(item.prompt);
+    if (rc < 0) {
+        s_state.busy = bsp_voice_is_busy();
+        return;
+    }
     workflow_voice_copy_symbol(s_state.last_prompt, sizeof(s_state.last_prompt), item.prompt);
     workflow_voice_copy_symbol(s_state.last_source, sizeof(s_state.last_source), item.source);
     s_state.last_prompt_at_ms = now_ms;

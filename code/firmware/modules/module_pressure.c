@@ -18,9 +18,9 @@ void module_pressure_tick_100ms(void)
 
 void module_pressure_tick_1s(void)
 {
-    /* BSP ADC hook: placeholder ramp */
-    s_val.pressure_mpa = 0.12f;
-    s_val.quality = 1U;
+    /* Real pressure source not wired yet: report unavailable instead of a fake fixed value. */
+    s_val.pressure_mpa = 0.0f;
+    s_val.quality = 0U;
 }
 
 uint8_t module_pressure_apply_config(const module_pressure_config_t *cfg)

@@ -14,6 +14,8 @@ typedef struct {
     bool     supported;
     uint32_t uart_port;
     uint32_t rx_buffered_bytes;
+    uint32_t audit_pending;
+    uint32_t audit_dropped;
     uint32_t frames_ok;
     uint32_t frames_invalid;
     uint32_t reports_sent;

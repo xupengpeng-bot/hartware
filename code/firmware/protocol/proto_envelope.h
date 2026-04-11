@@ -9,21 +9,19 @@
 #include <stdint.h>
 
 #define PROTO_LENGTH_PREFIX_BYTES 4U
-#define PROTO_PROTOCOL_NAME       "hj-device-v2"
-
-/** Logical message kinds for dispatch (maps to JSON top-level type field). */
-#define PROTO_MSG_REGISTER        "REGISTER"
-#define PROTO_MSG_REGISTER_ACK    "REGISTER_ACK"
-#define PROTO_MSG_REGISTER_NACK   "REGISTER_NACK"
-#define PROTO_MSG_HEARTBEAT       "HEARTBEAT"
-#define PROTO_MSG_STATE_SNAPSHOT  "STATE_SNAPSHOT"
-#define PROTO_MSG_COMMAND_ACK     "COMMAND_ACK"
-#define PROTO_MSG_COMMAND_NACK    "COMMAND_NACK"
-#define PROTO_MSG_SYNC_CONFIG     "SYNC_CONFIG"
-#define PROTO_MSG_QUERY           "QUERY"
-#define PROTO_MSG_QUERY_RESULT    "QUERY_RESULT"
-#define PROTO_MSG_EXECUTE_ACTION  "EXECUTE_ACTION"
-#define PROTO_MSG_EVENT_REPORT    "EVENT_REPORT"
+/** Compact protocol v1 short message codes. */
+#define PROTO_MSG_REGISTER        "RG"
+#define PROTO_MSG_REGISTER_ACK    "RA"
+#define PROTO_MSG_REGISTER_NACK   "RN"
+#define PROTO_MSG_HEARTBEAT       "HB"
+#define PROTO_MSG_STATE_SNAPSHOT  "SS"
+#define PROTO_MSG_COMMAND_ACK     "AK"
+#define PROTO_MSG_COMMAND_NACK    "NK"
+#define PROTO_MSG_SYNC_CONFIG     "SC"
+#define PROTO_MSG_QUERY           "QR"
+#define PROTO_MSG_QUERY_RESULT    "QS"
+#define PROTO_MSG_EXECUTE_ACTION  "EX"
+#define PROTO_MSG_EVENT_REPORT    "ER"
 
 #include "proto_codec_json.h"
 
@@ -43,12 +41,12 @@ int proto_envelope_decode(const uint8_t *wire, size_t wire_len, proto_envelope_t
 /** Write 4-byte BE length followed by body; returns total bytes written or negative. */
 int proto_envelope_encode(const char *json_body, size_t json_len, uint8_t *out, size_t out_cap);
 
-/** Shared outbound seq allocator for all hj-device-v2 messages. */
+/** Shared outbound seq allocator for all compact-protocol messages. */
 uint32_t proto_envelope_take_seq_no(uint32_t seq_no);
 
 /**
- * Append common hj-device-v2 envelope fields and open payload object:
- * {"protocol":"hj-device-v2","type":"...","imei":"...","msg_id":"...","seq":...,"ts":"...","payload":{
+ * Append compact envelope fields and open payload object:
+ * {"v":1,"t":"HB","i":"...","m":"000123","s":123,"p":{
  */
 int proto_envelope_append_payload_prefix(json_buf_t *jb, const char *msg_type, uint32_t seq_no,
                                          const char *correlation_id, const char *session_ref);

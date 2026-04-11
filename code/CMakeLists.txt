@@ -44,19 +44,20 @@ add_library(controller_firmware STATIC
     firmware/protocol/proto_query.c
     firmware/protocol/proto_execute_action.c
     firmware/storage/storage_config.c
+    firmware/storage/config_store.c
     firmware/storage/storage_runtime.c
     firmware/storage/storage_recovery.c
+    firmware/common/boot_diag.c
     firmware/common/common_status.c
     firmware/common/common_identity.c
     firmware/common/common_alarm.c
+    firmware/runtime/runtime_state.c
+    firmware/telemetry/telemetry.c
+    firmware/safety/safety_flow.c
     firmware/modules/module_registry.c
     firmware/modules/module_pump_vfd.c
-    firmware/modules/module_single_valve.c
-    firmware/modules/module_pressure.c
     firmware/modules/module_flow.c
     firmware/modules/module_meter.c
-    firmware/modules/module_soil_moisture.c
-    firmware/modules/module_soil_temperature.c
     firmware/workflow/workflow_engine.c
     firmware/workflow/workflow_control.c
     firmware/workflow/workflow_card_reader.c
@@ -95,7 +96,10 @@ target_include_directories(controller_firmware PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/firmware/protocol
     ${CMAKE_CURRENT_SOURCE_DIR}/firmware/storage
     ${CMAKE_CURRENT_SOURCE_DIR}/firmware/common
+    ${CMAKE_CURRENT_SOURCE_DIR}/firmware/runtime
     ${CMAKE_CURRENT_SOURCE_DIR}/firmware/modules
+    ${CMAKE_CURRENT_SOURCE_DIR}/firmware/telemetry
+    ${CMAKE_CURRENT_SOURCE_DIR}/firmware/safety
     ${CMAKE_CURRENT_SOURCE_DIR}/firmware/workflow
     ${CMAKE_CURRENT_SOURCE_DIR}/firmware/bsp
     ${CMAKE_CURRENT_SOURCE_DIR}/firmware/net
@@ -112,6 +116,18 @@ target_link_libraries(controller_firmware PUBLIC controller_ota)
 
 if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER MATCHES "arm-none-eabi")
     target_compile_definitions(controller_firmware PRIVATE BOARD_STM32F103=1)
+    target_compile_options(controller_ota PRIVATE
+        -Os
+        -fomit-frame-pointer
+        -fno-unwind-tables
+        -fno-asynchronous-unwind-tables
+    )
+    target_compile_options(controller_firmware PRIVATE
+        -Os
+        -fomit-frame-pointer
+        -fno-unwind-tables
+        -fno-asynchronous-unwind-tables
+    )
     # 未使用 FW_PLATFORM_CONFIG_DIR 时由编译器锁定北向 TCP，与 fw_build_config.h 一致，避免错误头文件覆盖
     if(NOT FW_PLATFORM_CONFIG_DIR)
         target_compile_definitions(controller_firmware PRIVATE

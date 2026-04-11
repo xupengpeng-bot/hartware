@@ -1,11 +1,7 @@
 #include "module_registry.h"
 #include "module_pump_vfd.h"
-#include "module_single_valve.h"
-#include "module_pressure.h"
 #include "module_flow.h"
 #include "module_meter.h"
-#include "module_soil_moisture.h"
-#include "module_soil_temperature.h"
 #include <string.h>
 
 static const module_ops_t *s_table[MODULE_REGISTRY_MAX];
@@ -69,10 +65,6 @@ void module_registry_tick_1s_all(void)
 void module_registry_register_builtin(void)
 {
     (void)module_registry_register(module_pump_vfd_ops());
-    (void)module_registry_register(module_single_valve_ops());
-    (void)module_registry_register(module_pressure_ops());
     (void)module_registry_register(module_flow_ops());
     (void)module_registry_register(module_meter_ops());
-    (void)module_registry_register(module_soil_moisture_ops());
-    (void)module_registry_register(module_soil_temperature_ops());
 }

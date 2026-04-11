@@ -1,155 +1,210 @@
 #include "proto_heartbeat.h"
-#include "proto_json_builder.h"
-#include "proto_envelope.h"
+
 #include "common_status.h"
-#include "workflow_engine.h"
-#include "workflow_voice.h"
-#include "cJSON.h"
+#include "config_store.h"
+#include "proto_codec_json.h"
+#include "proto_envelope.h"
+#include "runtime_state.h"
 
-#include <stdio.h>
+#include <string.h>
 
-static const char *workflow_state_str(workflow_state_t st)
+static int append_string_field(json_buf_t *jb, const char *key, const char *value)
 {
-    switch (st) {
-    case WF_BOOTING: return "booting";
-    case WF_ONLINE_NOT_READY: return "online_not_ready";
-    case WF_READY_IDLE: return "ready_idle";
-    case WF_STARTING: return "starting";
-    case WF_RUNNING: return "running";
-    case WF_PAUSING: return "pausing";
-    case WF_PAUSED: return "paused";
-    case WF_RESUMING: return "resuming";
-    case WF_STOPPING: return "stopping";
-    case WF_STOPPED: return "stopped";
-    case WF_ERROR_STOP: return "error_stop";
-    default: return "unknown";
+    if (jb == NULL || key == NULL || value == NULL) {
+        return -1;
     }
+    if (json_buf_append(jb, "\"") != 0 ||
+        json_buf_append(jb, key) != 0 ||
+        json_buf_append(jb, "\":\"") != 0 ||
+        json_escape_append(jb, value) != 0 ||
+        json_buf_append(jb, "\"") != 0) {
+        return -1;
+    }
+    return 0;
 }
 
-static cJSON *build_controller_state_json(const common_status_t *st)
+static uint8_t metric_in_range(float value, float min_allowed, float max_allowed)
 {
-    device_runtime_t *rt = workflow_engine_runtime();
-    cJSON *obj = cJSON_CreateObject();
-    if (obj == NULL) {
-        return NULL;
-    }
-    if (cJSON_AddBoolToObject(obj, "registered_once", st->registered_once) == NULL ||
-        cJSON_AddStringToObject(obj, "workflow_state", workflow_state_str(workflow_engine_get_state())) == NULL ||
-        cJSON_AddStringToObject(obj, "active_session_id", (rt && rt->active_session.session_id[0] != '\0') ? rt->active_session.session_id : "") == NULL ||
-        cJSON_AddNumberToObject(obj, "active_session_started_at_utc", (double)(rt ? rt->active_session.started_at_utc : 0U)) == NULL ||
-        cJSON_AddBoolToObject(obj, "recovery_pending", (rt && rt->recovery.recovery_pending) ? 1 : 0) == NULL ||
-        cJSON_AddBoolToObject(obj, "settlement_pending", (rt && rt->recovery.settlement_pending) ? 1 : 0) == NULL ||
-        cJSON_AddNumberToObject(obj, "stop_guard_remaining_ms", (double)workflow_engine_stop_guard_remaining_ms()) == NULL ||
-        cJSON_AddNumberToObject(obj, "last_stop_reason_code", (double)(rt ? rt->recovery.last_stop_reason_code : 0U)) == NULL ||
-        cJSON_AddNumberToObject(obj, "last_stop_at_utc", (double)(rt ? rt->recovery.last_stop_at_utc : 0U)) == NULL ||
-        cJSON_AddStringToObject(obj, "last_session_id", (rt && rt->recovery.last_session_id[0] != '\0') ? rt->recovery.last_session_id : "") == NULL ||
-        cJSON_AddNumberToObject(obj, "last_session_started_at_utc", (double)(rt ? rt->recovery.last_session_started_at_utc : 0U)) == NULL ||
-        cJSON_AddStringToObject(obj, "last_recovery_hint", (rt && rt->recovery.last_recovery_hint[0] != '\0') ? rt->recovery.last_recovery_hint : "") == NULL) {
-        cJSON_Delete(obj);
-        return NULL;
-    }
-    return obj;
+    return (value >= min_allowed && value <= max_allowed) ? 1U : 0U;
 }
 
-static cJSON *build_voice_state_json(void)
+static int append_numeric_flag_field(json_buf_t *jb, const char *key, uint8_t value)
 {
-    workflow_voice_state_t state;
-    cJSON *obj = cJSON_CreateObject();
-    workflow_voice_get_state(&state);
-    if (obj == NULL) {
-        return NULL;
+    if (jb == NULL || key == NULL) {
+        return -1;
     }
-    if (cJSON_AddBoolToObject(obj, "enabled", state.enabled) == NULL ||
-        cJSON_AddBoolToObject(obj, "supported", state.supported) == NULL ||
-        cJSON_AddBoolToObject(obj, "busy", state.busy) == NULL ||
-        cJSON_AddNumberToObject(obj, "queue_depth", (double)state.queue_depth) == NULL ||
-        cJSON_AddStringToObject(obj, "last_prompt", state.last_prompt) == NULL ||
-        cJSON_AddStringToObject(obj, "last_source", state.last_source) == NULL ||
-        cJSON_AddNumberToObject(obj, "last_prompt_at_ms", (double)state.last_prompt_at_ms) == NULL) {
-        cJSON_Delete(obj);
-        return NULL;
+    if (json_buf_append(jb, "\"") != 0 ||
+        json_buf_append(jb, key) != 0 ||
+        json_buf_append(jb, "\":") != 0) {
+        return -1;
     }
-    return obj;
+    return json_buf_append_fmt(jb, "%u", value != 0U ? 1U : 0U);
 }
 
-static int heartbeat_build_common_payload(char *buf, size_t cap, uint32_t seq, const char *kind, uint32_t uptime_sec, int vitals)
+static int append_u32_field(json_buf_t *jb, const char *key, uint32_t value)
 {
-    const common_status_t *st = common_status_get();
-    cJSON *payload = cJSON_CreateObject();
-    cJSON *common_status = cJSON_CreateObject();
-    cJSON *controller_state = build_controller_state_json(st);
-    cJSON *voice_state = build_voice_state_json();
-    int rc;
+    if (jb == NULL || key == NULL) {
+        return -1;
+    }
+    if (json_buf_append(jb, "\"") != 0 ||
+        json_buf_append(jb, key) != 0 ||
+        json_buf_append(jb, "\":") != 0) {
+        return -1;
+    }
+    return json_buf_append_fmt(jb, "%lu", (unsigned long)value);
+}
 
-    if (payload == NULL || common_status == NULL || controller_state == NULL || voice_state == NULL) {
-        cJSON_Delete(payload);
-        cJSON_Delete(common_status);
-        cJSON_Delete(controller_state);
-        cJSON_Delete(voice_state);
+static int append_i32_field(json_buf_t *jb, const char *key, int32_t value)
+{
+    if (jb == NULL || key == NULL) {
+        return -1;
+    }
+    if (json_buf_append(jb, "\"") != 0 ||
+        json_buf_append(jb, key) != 0 ||
+        json_buf_append(jb, "\":") != 0) {
+        return -1;
+    }
+    return json_buf_append_fmt(jb, "%ld", (long)value);
+}
+
+static int append_fixed_field(json_buf_t *jb, const char *key, float value, uint8_t frac_digits)
+{
+    if (jb == NULL || key == NULL) {
+        return -1;
+    }
+    if (json_buf_append(jb, "\"") != 0 ||
+        json_buf_append(jb, key) != 0 ||
+        json_buf_append(jb, "\":") != 0) {
+        return -1;
+    }
+    return json_buf_append_fixed(jb, value, frac_digits);
+}
+
+static const char *breaker_state_value(const runtime_state_t *rs)
+{
+    const device_config_t *cfg = config_store_active();
+
+    if (cfg == NULL || cfg->feature_modules.breaker_feedback_monitor == 0U) {
+        return NULL;
+    }
+    if (rs == NULL) {
+        return NULL;
+    }
+    return rs->pump_state == RUNTIME_PUMP_RUNNING ? "closed" : "opened";
+}
+
+static int append_optional_separator(json_buf_t *jb, uint8_t *first)
+{
+    if (jb == NULL || first == NULL) {
+        return -1;
+    }
+    if (*first == 0U) {
+        return json_buf_append(jb, ",");
+    }
+    *first = 0U;
+    return 0;
+}
+
+static int heartbeat_build_common(char *buf, size_t cap, uint32_t seq)
+{
+    json_buf_t jb;
+    const common_status_t *cs = common_status_get();
+    const runtime_state_t *rs = runtime_state_get();
+    uint8_t signal_valid;
+    uint8_t battery_v_valid;
+    uint8_t solar_v_valid;
+    uint8_t battery_soc_valid;
+    uint8_t first = 1U;
+
+    if (buf == NULL || cap < 512U || rs == NULL || cs == NULL) {
+        return -1;
+    }
+
+    signal_valid = (rs->signal_csq >= 0 && rs->signal_csq <= 99) ? 1U : 0U;
+    battery_v_valid = metric_in_range(cs->battery_voltage_v, 0.1f, 64.0f);
+    solar_v_valid = metric_in_range(cs->solar_voltage_v, 0.0f, 64.0f);
+    battery_soc_valid = (battery_v_valid != 0U && rs->battery_soc <= 100U) ? 1U : 0U;
+
+    json_buf_init(&jb, buf, cap);
+    if (proto_envelope_append_payload_prefix(&jb, PROTO_MSG_HEARTBEAT, seq, NULL, NULL) != 0) {
         return -2;
     }
 
-    if (cJSON_AddStringToObject(payload, "heartbeat_kind", kind) == NULL) {
-        cJSON_Delete(payload);
-        cJSON_Delete(common_status);
-        cJSON_Delete(controller_state);
-        cJSON_Delete(voice_state);
-        return -2;
+    if (append_optional_separator(&jb, &first) != 0 ||
+        append_numeric_flag_field(&jb, "rd", rs->ready ? 1U : 0U) != 0 ||
+        append_optional_separator(&jb, &first) != 0 ||
+        append_numeric_flag_field(&jb, "on", rs->online ? 1U : 0U) != 0 ||
+        append_optional_separator(&jb, &first) != 0 ||
+        append_numeric_flag_field(&jb, "tc", rs->tcp_connected ? 1U : 0U) != 0 ||
+        append_optional_separator(&jb, &first) != 0 ||
+        append_string_field(&jb, "wf",
+                            proto_map_workflow_short_from_runtime(runtime_state_workflow_name(rs->workflow_state),
+                                                                  rs->ready ? 1U : 0U)) != 0 ||
+        append_optional_separator(&jb, &first) != 0 ||
+        append_u32_field(&jb, "cv", rs->config_version) != 0 ||
+        append_optional_separator(&jb, &first) != 0 ||
+        append_string_field(&jb, "pm", proto_map_power_mode_short(runtime_state_power_name(rs->power_state))) != 0) {
+        return -3;
     }
-    if (!vitals) {
-        if (cJSON_AddNumberToObject(payload, "uptime_sec", (double)uptime_sec) == NULL) {
-            cJSON_Delete(payload);
-            cJSON_Delete(common_status);
-            cJSON_Delete(controller_state);
-            cJSON_Delete(voice_state);
-            return -2;
+
+    if (append_optional_separator(&jb, &first) != 0 ||
+        append_u32_field(&jb, "rt", rs->runtime_sec) != 0 ||
+        append_optional_separator(&jb, &first) != 0 ||
+        append_u32_field(&jb, "me", rs->meter_epoch) != 0) {
+        return -3;
+    }
+
+    if (metric_in_range(rs->total_m3, 0.0f, 10000000.0f) != 0U) {
+        if (append_optional_separator(&jb, &first) != 0 ||
+            append_fixed_field(&jb, "fq", rs->total_m3, 2U) != 0) {
+            return -3;
+        }
+    }
+    if (metric_in_range(rs->energy_kwh, 0.0f, 10000000.0f) != 0U) {
+        if (append_optional_separator(&jb, &first) != 0 ||
+            append_fixed_field(&jb, "ek", rs->energy_kwh, 2U) != 0) {
+            return -3;
         }
     }
 
-    if ((vitals &&
-         (cJSON_AddNumberToObject(common_status, "signal_csq", (double)st->signal_csq) == NULL ||
-          cJSON_AddNumberToObject(common_status, "signal_rsrp", (double)st->rsrp_dbm) == NULL ||
-          cJSON_AddNumberToObject(common_status, "signal_rsrq", (double)st->rsrq_db) == NULL ||
-          cJSON_AddNumberToObject(common_status, "battery_soc", (double)st->battery_soc) == NULL ||
-          cJSON_AddNumberToObject(common_status, "battery_voltage", (double)st->battery_voltage_v) == NULL ||
-          cJSON_AddNumberToObject(common_status, "solar_voltage", (double)st->solar_voltage_v) == NULL ||
-          cJSON_AddNumberToObject(common_status, "power_mode", (double)st->power_mode) == NULL)) ||
-        cJSON_AddBoolToObject(common_status, "online", st->online) == NULL ||
-        cJSON_AddBoolToObject(common_status, "tcp_connected", st->tcp_connected) == NULL ||
-        cJSON_AddBoolToObject(common_status, "ready", st->ready) == NULL ||
-        cJSON_AddNumberToObject(common_status, "config_version", (double)st->config_version) == NULL) {
-        cJSON_Delete(payload);
-        cJSON_Delete(common_status);
-        cJSON_Delete(controller_state);
-        cJSON_Delete(voice_state);
-        return -2;
+    if (signal_valid != 0U) {
+        if (append_optional_separator(&jb, &first) != 0 ||
+            append_i32_field(&jb, "csq", rs->signal_csq) != 0) {
+            return -3;
+        }
+    }
+    if (battery_soc_valid != 0U) {
+        if (append_optional_separator(&jb, &first) != 0 ||
+            append_u32_field(&jb, "bs", (uint32_t)rs->battery_soc) != 0) {
+            return -3;
+        }
+    }
+    if (battery_v_valid != 0U) {
+        if (append_optional_separator(&jb, &first) != 0 ||
+            append_fixed_field(&jb, "bv", cs->battery_voltage_v, 2U) != 0) {
+            return -3;
+        }
+    }
+    if (solar_v_valid != 0U) {
+        if (append_optional_separator(&jb, &first) != 0 ||
+            append_fixed_field(&jb, "sv", cs->solar_voltage_v, 2U) != 0) {
+            return -3;
+        }
+    }
+    if (breaker_state_value(rs) != NULL) {
+        if (append_optional_separator(&jb, &first) != 0 ||
+            append_string_field(&jb, "brs", breaker_state_value(rs)) != 0) {
+            return -3;
+        }
     }
 
-    cJSON_AddItemToObject(payload, "common_status", common_status);
-    cJSON_AddItemToObject(payload, "controller_state", controller_state);
-    cJSON_AddItemToObject(payload, "voice_state", voice_state);
-
-    rc = proto_json_build_message(buf, cap, PROTO_MSG_HEARTBEAT, seq, NULL, NULL, payload);
-    return rc < 0 ? -2 : rc;
-}
-
-int proto_heartbeat_build_ping(char *buf, size_t cap, uint32_t seq, uint32_t uptime_sec)
-{
-    if (buf == NULL || cap < 640U) {
-        return -1;
+    if (proto_envelope_close_payload(&jb) != 0) {
+        return -4;
     }
-    return heartbeat_build_common_payload(buf, cap, seq, "ping", uptime_sec, 0);
-}
-
-int proto_heartbeat_build_vitals(char *buf, size_t cap)
-{
-    if (buf == NULL || cap < 896U) {
-        return -1;
-    }
-    return heartbeat_build_common_payload(buf, cap, 0U, "vitals", 0U, 1);
+    return (int)jb.len;
 }
 
 int proto_heartbeat_build(char *buf, size_t cap)
 {
-    return proto_heartbeat_build_vitals(buf, cap);
+    return heartbeat_build_common(buf, cap, 0U);
 }

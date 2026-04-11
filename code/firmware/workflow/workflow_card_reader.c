@@ -2,17 +2,22 @@
 #include "bsp_uart.h"
 #include "common_status.h"
 #include "proto_event_report.h"
-#include "workflow_engine.h"
+#include "runtime_state.h"
+#include "safety_flow.h"
 #include "workflow_voice.h"
 
 #include <stdio.h>
 #include <string.h>
 
 #define WORKFLOW_CARD_READER_UART_PORT ((int)BOARD_HW_UART_PORT_CARD_READER)
-#define WORKFLOW_CARD_READER_BUFFER_CAP           128U
+#define WORKFLOW_CARD_READER_BUFFER_CAP           256U
 #define WORKFLOW_CARD_READER_LINE_CAP             96U
 #define WORKFLOW_CARD_READER_GLOBAL_DEBOUNCE_MS   250U
 #define WORKFLOW_CARD_READER_SAME_TOKEN_DEBOUNCE_MS 1500U
+#define WORKFLOW_CARD_READER_OFFLINE_PROMPT_GAP_MS 3000U
+#define WORKFLOW_CARD_READER_AUDIT_QUEUE_CAP      32U
+#define WORKFLOW_CARD_READER_AUDIT_MAX_FLUSH      4U
+#define WORKFLOW_CARD_READER_AUDIT_MSG_LEN        80U
 
 typedef enum {
     WORKFLOW_CARD_READER_GUARD_ALLOW = 0,
@@ -28,6 +33,37 @@ static uint8_t                      s_rx_buffer[WORKFLOW_CARD_READER_BUFFER_CAP]
 static size_t                       s_rx_len;
 static char                         s_last_handled_token[32];
 static uint32_t                     s_last_handled_at_ms;
+static uint32_t                     s_last_offline_feedback_at_ms;
+
+typedef struct {
+    char     outcome[WORKFLOW_CARD_READER_OUTCOME_LEN];
+    char     reason[WORKFLOW_CARD_READER_REASON_LEN];
+    char     source[WORKFLOW_CARD_READER_SOURCE_LEN];
+    char     token_suffix[WORKFLOW_CARD_READER_TOKEN_SUFFIX_LEN];
+    uint32_t swipe_at_ms;
+} workflow_card_reader_audit_event_t;
+
+static workflow_card_reader_audit_event_t s_audit_queue[WORKFLOW_CARD_READER_AUDIT_QUEUE_CAP];
+static uint8_t                            s_audit_head;
+static uint8_t                            s_audit_count;
+
+static void workflow_card_reader_logf(const char *fmt, const char *text, unsigned long value1, unsigned long value2)
+{
+    char line[192];
+
+    if (fmt == NULL) {
+        return;
+    }
+
+    (void)snprintf(line, sizeof(line), "[CARD] ");
+    {
+        size_t used = strlen(line);
+        if (used < sizeof(line)) {
+            (void)snprintf(line + used, sizeof(line) - used, fmt, text != NULL ? text : "", value1, value2);
+        }
+    }
+    bsp_debug_log(line);
+}
 
 static void workflow_card_reader_copy_symbol(char *dst, size_t cap, const char *src)
 {
@@ -55,36 +91,6 @@ static void workflow_card_reader_copy_symbol(char *dst, size_t cap, const char *
     dst[idx] = '\0';
 }
 
-static const char *workflow_card_reader_state_label(workflow_state_t state)
-{
-    switch (state) {
-    case WF_BOOTING:
-        return "booting";
-    case WF_ONLINE_NOT_READY:
-        return "online_not_ready";
-    case WF_READY_IDLE:
-        return "ready_idle";
-    case WF_STARTING:
-        return "starting";
-    case WF_RUNNING:
-        return "running";
-    case WF_PAUSING:
-        return "pausing";
-    case WF_PAUSED:
-        return "paused";
-    case WF_RESUMING:
-        return "resuming";
-    case WF_STOPPING:
-        return "stopping";
-    case WF_STOPPED:
-        return "stopped";
-    case WF_ERROR_STOP:
-        return "error_stop";
-    default:
-        return "unknown";
-    }
-}
-
 static void workflow_card_reader_copy_token_suffix(const char *token)
 {
     size_t token_len;
@@ -102,6 +108,27 @@ static void workflow_card_reader_copy_token_suffix(const char *token)
     workflow_card_reader_copy_symbol(s_state.last_token_suffix, sizeof(s_state.last_token_suffix), suffix);
 }
 
+static void workflow_card_reader_copy_token_suffix_to(char *dst, size_t cap, const char *token)
+{
+    size_t token_len;
+    size_t suffix_len;
+    const char *suffix;
+
+    if (!dst || cap == 0U) {
+        return;
+    }
+
+    if (!token || token[0] == '\0') {
+        dst[0] = '\0';
+        return;
+    }
+
+    token_len = strlen(token);
+    suffix_len = token_len > 6U ? 6U : token_len;
+    suffix = token + (token_len - suffix_len);
+    workflow_card_reader_copy_symbol(dst, cap, suffix);
+}
+
 static void workflow_card_reader_set_state(const char *outcome,
                                            const char *reason,
                                            const char *source,
@@ -117,6 +144,94 @@ static void workflow_card_reader_set_state(const char *outcome,
     if (last_reported_at_ms != 0U) {
         s_state.last_reported_at_ms = last_reported_at_ms;
     }
+}
+
+static int workflow_card_reader_send_audit_event(const workflow_card_reader_audit_event_t *event)
+{
+    char safe_reason[WORKFLOW_CARD_READER_REASON_LEN];
+    char safe_msg[WORKFLOW_CARD_READER_AUDIT_MSG_LEN];
+    int  written;
+
+    if (event == NULL) {
+        return -1;
+    }
+
+    workflow_card_reader_copy_symbol(safe_reason, sizeof(safe_reason), event->reason);
+    if (event->token_suffix[0] != '\0') {
+        written = snprintf(safe_msg,
+                           sizeof(safe_msg),
+                           "%s|%s|%s",
+                           event->outcome,
+                           event->source,
+                           event->token_suffix);
+    } else {
+        written = snprintf(safe_msg,
+                           sizeof(safe_msg),
+                           "%s|%s",
+                           event->outcome,
+                           event->source);
+    }
+    if (written < 0 || (size_t)written >= sizeof(safe_msg)) {
+        safe_msg[0] = '\0';
+    }
+    return proto_event_report_send_min(NULL, "cse", safe_reason, safe_msg, "card");
+}
+
+static void workflow_card_reader_queue_audit(const char *outcome,
+                                             const char *reason,
+                                             const char *source,
+                                             const char *token,
+                                             uint32_t    now_ms)
+{
+    workflow_card_reader_audit_event_t *slot;
+    uint8_t index;
+
+    if (s_audit_count >= WORKFLOW_CARD_READER_AUDIT_QUEUE_CAP) {
+        s_audit_head = (uint8_t)((s_audit_head + 1U) % WORKFLOW_CARD_READER_AUDIT_QUEUE_CAP);
+        s_audit_count = (uint8_t)(WORKFLOW_CARD_READER_AUDIT_QUEUE_CAP - 1U);
+        s_state.audit_dropped += 1U;
+    }
+
+    index = (uint8_t)((s_audit_head + s_audit_count) % WORKFLOW_CARD_READER_AUDIT_QUEUE_CAP);
+    slot = &s_audit_queue[index];
+    memset(slot, 0, sizeof(*slot));
+    workflow_card_reader_copy_symbol(slot->outcome, sizeof(slot->outcome), outcome);
+    workflow_card_reader_copy_symbol(slot->reason, sizeof(slot->reason), reason);
+    workflow_card_reader_copy_symbol(slot->source, sizeof(slot->source), source);
+    workflow_card_reader_copy_token_suffix_to(slot->token_suffix, sizeof(slot->token_suffix), token);
+    slot->swipe_at_ms = now_ms;
+    s_audit_count += 1U;
+    s_state.audit_pending = s_audit_count;
+}
+
+static void workflow_card_reader_flush_audit(uint32_t now_ms)
+{
+    const common_status_t *status = common_status_get();
+    uint8_t flushed = 0U;
+
+    if (status == NULL || !status->online || !status->tcp_connected) {
+        s_state.audit_pending = s_audit_count;
+        return;
+    }
+
+    while (s_audit_count > 0U && flushed < WORKFLOW_CARD_READER_AUDIT_MAX_FLUSH) {
+        workflow_card_reader_audit_event_t *event = &s_audit_queue[s_audit_head];
+
+        if (workflow_card_reader_send_audit_event(event) <= 0) {
+            s_state.reports_failed += 1U;
+            break;
+        }
+
+        s_state.reports_sent += 1U;
+        s_state.last_reported_at_ms = now_ms;
+        runtime_state_inc_counter_event_report();
+        memset(event, 0, sizeof(*event));
+        s_audit_head = (uint8_t)((s_audit_head + 1U) % WORKFLOW_CARD_READER_AUDIT_QUEUE_CAP);
+        s_audit_count -= 1U;
+        flushed += 1U;
+    }
+
+    s_state.audit_pending = s_audit_count;
 }
 
 static uint8_t workflow_card_reader_checksum_ok(const uint8_t *frame, size_t len)
@@ -220,6 +335,11 @@ static void workflow_card_reader_append_bytes(const uint8_t *data, size_t len)
         s_rx_len = sizeof(s_rx_buffer);
         s_state.frames_invalid += 1U;
         s_state.rx_buffered_bytes = (uint32_t)s_rx_len;
+        workflow_card_reader_logf("overflow reset total=%lu bytes=%lu\r\n",
+                                  "",
+                                  (unsigned long)s_rx_len,
+                                  (unsigned long)len);
+        workflow_card_reader_queue_audit("parse_invalid", "overflow_reset", "uart1_card_reader", NULL, 0U);
         return;
     }
 
@@ -228,6 +348,11 @@ static void workflow_card_reader_append_bytes(const uint8_t *data, size_t len)
         memmove(s_rx_buffer, s_rx_buffer + overflow, s_rx_len - overflow);
         s_rx_len -= overflow;
         s_state.frames_invalid += 1U;
+        workflow_card_reader_logf("overflow drop=%lu total=%lu\r\n",
+                                  "",
+                                  (unsigned long)overflow,
+                                  (unsigned long)(s_rx_len + len));
+        workflow_card_reader_queue_audit("parse_invalid", "overflow_drop", "uart1_card_reader", NULL, 0U);
     }
 
     memcpy(s_rx_buffer + s_rx_len, data, len);
@@ -250,8 +375,7 @@ static void workflow_card_reader_note_handled(const char *token, uint32_t now_ms
 static workflow_card_reader_guard_t workflow_card_reader_guard(const char *token, uint32_t now_ms, char *reason, size_t reason_cap)
 {
     const common_status_t *status = common_status_get();
-    device_runtime_t      *runtime = workflow_engine_runtime();
-    workflow_state_t       state = workflow_engine_get_state();
+    const runtime_state_t *runtime = runtime_state_get();
 
     if (s_last_handled_at_ms != 0U) {
         uint32_t delta_ms = now_ms - s_last_handled_at_ms;
@@ -275,23 +399,33 @@ static workflow_card_reader_guard_t workflow_card_reader_guard(const char *token
         return WORKFLOW_CARD_READER_GUARD_OFFLINE;
     }
 
-    if (status->fault_count > 0U || state == WF_ERROR_STOP) {
+    if (status->fault_count > 0U || runtime->protection_active) {
         workflow_card_reader_copy_symbol(reason, reason_cap, "controller_fault");
         return WORKFLOW_CARD_READER_GUARD_FAULT;
     }
 
-    if (workflow_engine_stop_guard_remaining_ms() > 0U ||
-        (runtime && (runtime->recovery.recovery_pending || runtime->recovery.settlement_pending))) {
+    if (runtime->workflow_state == RUNTIME_WORKFLOW_STOP_SEQUENCE ||
+        runtime->workflow_state == RUNTIME_WORKFLOW_POST_STOP_METERING) {
         workflow_card_reader_copy_symbol(reason, reason_cap, "stop_guard_active");
         return WORKFLOW_CARD_READER_GUARD_STOP_GUARD;
     }
 
-    if (state == WF_STARTING || state == WF_PAUSING || state == WF_RESUMING || state == WF_STOPPING) {
+    if (runtime->card_state != CARD_STATE_IDLE &&
+        runtime->card_state != CARD_STATE_COMPLETED &&
+        runtime->card_state != CARD_STATE_BLOCKED) {
+        workflow_card_reader_copy_symbol(reason, reason_cap, "card_flow_busy");
+        return WORKFLOW_CARD_READER_GUARD_BUSY;
+    }
+
+    if (runtime->run_state == RUNTIME_RUN_STARTING || runtime->run_state == RUNTIME_RUN_STOPPING ||
+        runtime->workflow_state == RUNTIME_WORKFLOW_AUTH_PENDING) {
         workflow_card_reader_copy_symbol(reason, reason_cap, "workflow_transition_busy");
         return WORKFLOW_CARD_READER_GUARD_BUSY;
     }
 
-    if ((state != WF_READY_IDLE && state != WF_RUNNING && state != WF_PAUSED) || (!status->ready && state == WF_READY_IDLE)) {
+    if (!status->ready ||
+        runtime->workflow_state == RUNTIME_WORKFLOW_RECOVERY_LOCKED ||
+        runtime->workflow_state == RUNTIME_WORKFLOW_FAULT_LATCHED) {
         workflow_card_reader_copy_symbol(reason, reason_cap, "controller_not_ready");
         return WORKFLOW_CARD_READER_GUARD_NOT_READY;
     }
@@ -300,9 +434,10 @@ static workflow_card_reader_guard_t workflow_card_reader_guard(const char *token
     return WORKFLOW_CARD_READER_GUARD_ALLOW;
 }
 
-static void workflow_card_reader_prompt_for_guard(workflow_card_reader_guard_t guard)
+static void workflow_card_reader_prompt_for_guard(workflow_card_reader_guard_t guard, uint32_t now_ms)
 {
     static const char *not_ready_prompts[] = {"welcome", "starting_wait"};
+    const common_status_t *status = common_status_get();
 
     switch (guard) {
     case WORKFLOW_CARD_READER_GUARD_NOT_READY:
@@ -313,7 +448,16 @@ static void workflow_card_reader_prompt_for_guard(workflow_card_reader_guard_t g
         workflow_voice_prompt_once("port_busy", "card_reader_guard", 1500U);
         break;
     case WORKFLOW_CARD_READER_GUARD_OFFLINE:
-        workflow_voice_prompt_once("unavailable", "card_reader_guard", 1500U);
+        if (status != NULL && status->online) {
+            if (s_last_offline_feedback_at_ms == 0U ||
+                (uint32_t)(now_ms - s_last_offline_feedback_at_ms) >= WORKFLOW_CARD_READER_OFFLINE_PROMPT_GAP_MS) {
+                workflow_voice_prompt_once("starting_wait", "card_reader_guard", 1500U);
+                s_last_offline_feedback_at_ms = now_ms;
+            }
+        } else {
+            workflow_voice_prompt_once("unavailable", "card_reader_guard", 1500U);
+            s_last_offline_feedback_at_ms = now_ms;
+        }
         break;
     case WORKFLOW_CARD_READER_GUARD_FAULT:
         workflow_voice_prompt_once("device_fault", "card_reader_guard", 1500U);
@@ -323,78 +467,59 @@ static void workflow_card_reader_prompt_for_guard(workflow_card_reader_guard_t g
     }
 }
 
-static int workflow_card_reader_emit_event(const char *event_code,
-                                           const char *token,
-                                           const char *reason,
-                                           const char *source_code)
-{
-    char        safe_token[48];
-    char        safe_reason[WORKFLOW_CARD_READER_REASON_LEN];
-    char        safe_source[WORKFLOW_CARD_READER_SOURCE_LEN];
-    workflow_state_t state = workflow_engine_get_state();
-    const common_status_t *status = common_status_get();
-
-    workflow_card_reader_copy_symbol(safe_token, sizeof(safe_token), token);
-    workflow_card_reader_copy_symbol(safe_reason, sizeof(safe_reason), reason);
-    workflow_card_reader_copy_symbol(safe_source, sizeof(safe_source), source_code);
-    return proto_event_report_sendf(NULL, event_code,
-                                    "\"card_token\":\"%s\","
-                                    "\"swipe_source\":\"%s\","
-                                    "\"reader_reason\":\"%s\","
-                                    "\"workflow_state\":\"%s\","
-                                    "\"ready\":%s,"
-                                    "\"tcp_connected\":%s,"
-                                    "\"stop_guard_remaining_ms\":%lu",
-                                    safe_token,
-                                    safe_source,
-                                    safe_reason,
-                                    workflow_card_reader_state_label(state),
-                                    (status && status->ready) ? "true" : "false",
-                                    (status && status->tcp_connected) ? "true" : "false",
-                                    (unsigned long)workflow_engine_stop_guard_remaining_ms());
-}
-
 static void workflow_card_reader_emit_rejected(const char *reason, const char *token, uint32_t now_ms)
 {
-    if (workflow_card_reader_emit_event("card_swipe_rejected", token, reason, "uart1_card_reader") > 0) {
-        s_state.reports_sent += 1U;
-        s_state.last_reported_at_ms = now_ms;
-    } else {
-        s_state.reports_failed += 1U;
-    }
+    workflow_card_reader_logf("rejected token=%s now_ms=%lu reports=%lu\r\n",
+                              token,
+                              (unsigned long)now_ms,
+                              (unsigned long)s_state.reports_sent);
+    workflow_card_reader_queue_audit("rejected", reason, "uart1_card_reader", token, now_ms);
 }
 
 static void workflow_card_reader_handle_token(const char *token, const char *source_code, uint32_t now_ms)
 {
     char reason[WORKFLOW_CARD_READER_REASON_LEN];
     workflow_card_reader_guard_t guard;
-    int send_result;
+    int rc;
 
     reason[0] = '\0';
     guard = workflow_card_reader_guard(token, now_ms, reason, sizeof(reason));
+    workflow_card_reader_logf("token=%s guard=%lu now_ms=%lu\r\n",
+                              token,
+                              (unsigned long)guard,
+                              (unsigned long)now_ms);
 
     if (guard != WORKFLOW_CARD_READER_GUARD_ALLOW) {
-        if (strcmp(reason, "global_debounce") != 0 && strcmp(reason, "same_token_debounce") != 0) {
+        if (strcmp(reason, "global_debounce") == 0 || strcmp(reason, "same_token_debounce") == 0) {
+            workflow_card_reader_queue_audit("debounced", reason, source_code, token, now_ms);
+        } else {
             s_state.rejected_count += 1U;
             workflow_card_reader_set_state("rejected", reason, source_code, token, now_ms, 0U);
             workflow_card_reader_note_handled(token, now_ms);
             workflow_card_reader_emit_rejected(reason, token, now_ms);
-            workflow_card_reader_prompt_for_guard(guard);
+            workflow_card_reader_prompt_for_guard(guard, now_ms);
         }
         return;
     }
 
-    workflow_voice_prompt_once("welcome", "card_reader", 800U);
-    send_result = workflow_card_reader_emit_event("card_swipe_requested", token, reason, source_code);
     workflow_card_reader_note_handled(token, now_ms);
-    if (send_result > 0) {
-        s_state.reports_sent += 1U;
-        s_state.last_reported_at_ms = now_ms;
+    rc = safety_flow_on_card_read(token);
+    workflow_card_reader_logf("dispatch token=%s rc=%ld now_ms=%lu\r\n",
+                              token,
+                              (long)rc,
+                              (unsigned long)now_ms);
+    if (rc == 0) {
+        workflow_voice_prompt_once("welcome", "card_reader", 800U);
         workflow_card_reader_set_state("reported", reason, source_code, token, now_ms, now_ms);
+        workflow_card_reader_queue_audit("accepted", "platform_checkout", source_code, token, now_ms);
     } else {
-        s_state.reports_failed += 1U;
-        workflow_card_reader_set_state("report_failed", "event_report_send_failed", source_code, token, now_ms, 0U);
-        workflow_voice_prompt_once("unavailable", "card_reader", 1500U);
+        workflow_card_reader_set_state("report_failed", "local_card_flow_rejected", source_code, token, now_ms, 0U);
+        workflow_card_reader_queue_audit("rejected", "local_card_flow_rejected", source_code, token, now_ms);
+        if (rc == -3) {
+            workflow_voice_prompt_once("port_busy", "card_reader", 1500U);
+        } else {
+            workflow_voice_prompt_once("unavailable", "card_reader", 1500U);
+        }
     }
 }
 
@@ -414,23 +539,41 @@ static size_t workflow_card_reader_try_parse_binary(uint32_t now_ms)
         if (workflow_card_reader_checksum_ok(s_rx_buffer, 13U)) {
             workflow_card_reader_token_from_frame(s_rx_buffer, token, sizeof(token));
             s_state.frames_ok += 1U;
+            workflow_card_reader_logf("binary token=%s frames_ok=%lu rx_len=%lu\r\n",
+                                      token,
+                                      (unsigned long)s_state.frames_ok,
+                                      (unsigned long)s_rx_len);
             workflow_card_reader_handle_token(token, "uart1_card_reader", now_ms);
             return 14U;
         }
         s_state.frames_invalid += 1U;
+        workflow_card_reader_logf("binary checksum_failed frames_invalid=%lu rx_len=%lu\r\n",
+                                  "",
+                                  (unsigned long)s_state.frames_invalid,
+                                  (unsigned long)s_rx_len);
         workflow_card_reader_set_state("parse_invalid", "checksum_failed", "uart1_card_reader", NULL, now_ms, 0U);
+        workflow_card_reader_queue_audit("parse_invalid", "checksum_failed", "uart1_card_reader", NULL, now_ms);
         return 1U;
     }
 
     if (workflow_card_reader_checksum_ok(s_rx_buffer, 13U)) {
         workflow_card_reader_token_from_frame(s_rx_buffer, token, sizeof(token));
         s_state.frames_ok += 1U;
+        workflow_card_reader_logf("binary token=%s frames_ok=%lu rx_len=%lu\r\n",
+                                  token,
+                                  (unsigned long)s_state.frames_ok,
+                                  (unsigned long)s_rx_len);
         workflow_card_reader_handle_token(token, "uart1_card_reader", now_ms);
         return 13U;
     }
 
     s_state.frames_invalid += 1U;
+    workflow_card_reader_logf("binary checksum_failed frames_invalid=%lu rx_len=%lu\r\n",
+                              "",
+                              (unsigned long)s_state.frames_invalid,
+                              (unsigned long)s_rx_len);
     workflow_card_reader_set_state("parse_invalid", "checksum_failed", "uart1_card_reader", NULL, now_ms, 0U);
+    workflow_card_reader_queue_audit("parse_invalid", "checksum_failed", "uart1_card_reader", NULL, now_ms);
     return 1U;
 }
 
@@ -451,6 +594,7 @@ static size_t workflow_card_reader_try_parse_ascii(uint32_t now_ms)
         if (s_rx_len >= sizeof(line) - 1U) {
             s_state.frames_invalid += 1U;
             workflow_card_reader_set_state("parse_invalid", "ascii_line_overflow", "uart_ascii_card_reader", NULL, now_ms, 0U);
+            workflow_card_reader_queue_audit("parse_invalid", "ascii_line_overflow", "uart_ascii_card_reader", NULL, now_ms);
             return s_rx_len;
         }
         return 0U;
@@ -470,11 +614,20 @@ static size_t workflow_card_reader_try_parse_ascii(uint32_t now_ms)
 
     if (workflow_card_reader_extract_ascii_token(line, token, sizeof(token)) != 0) {
         s_state.frames_invalid += 1U;
+        workflow_card_reader_logf("ascii invalid frames_invalid=%lu rx_len=%lu\r\n",
+                                  "",
+                                  (unsigned long)s_state.frames_invalid,
+                                  (unsigned long)s_rx_len);
         workflow_card_reader_set_state("parse_invalid", "ascii_token_invalid", "uart_ascii_card_reader", NULL, now_ms, 0U);
+        workflow_card_reader_queue_audit("parse_invalid", "ascii_token_invalid", "uart_ascii_card_reader", NULL, now_ms);
         return consume;
     }
 
     s_state.frames_ok += 1U;
+    workflow_card_reader_logf("ascii token=%s frames_ok=%lu rx_len=%lu\r\n",
+                              token,
+                              (unsigned long)s_state.frames_ok,
+                              (unsigned long)s_rx_len);
     workflow_card_reader_handle_token(token, "uart_ascii_card_reader", now_ms);
     return consume;
 }
@@ -487,9 +640,15 @@ void workflow_card_reader_init(void)
     s_rx_len = 0U;
     memset(s_last_handled_token, 0, sizeof(s_last_handled_token));
     s_last_handled_at_ms = 0U;
+    s_last_offline_feedback_at_ms = 0U;
+    memset(s_audit_queue, 0, sizeof(s_audit_queue));
+    s_audit_head = 0U;
+    s_audit_count = 0U;
     s_state.enabled = true;
     s_state.supported = true;
     s_state.uart_port = WORKFLOW_CARD_READER_UART_PORT;
+    s_state.audit_pending = 0U;
+    s_state.audit_dropped = 0U;
     workflow_card_reader_copy_symbol(s_state.last_outcome, sizeof(s_state.last_outcome), "idle");
 }
 
@@ -502,7 +661,13 @@ void workflow_card_reader_tick(uint32_t now_ms)
     do {
         read_bytes = bsp_uart_read((int)s_state.uart_port, chunk, sizeof(chunk));
         if (read_bytes > 0) {
+            char first_hex[8];
             workflow_card_reader_append_bytes(chunk, (size_t)read_bytes);
+            (void)snprintf(first_hex, sizeof(first_hex), "%02lX", (unsigned long)chunk[0]);
+            workflow_card_reader_logf("rx first=0x%s total=%lu bytes=%lu\r\n",
+                                      first_hex,
+                                      (unsigned long)s_rx_len,
+                                      (unsigned long)read_bytes);
         }
     } while (read_bytes > 0);
 
@@ -528,6 +693,8 @@ void workflow_card_reader_tick(uint32_t now_ms)
 
         workflow_card_reader_consume(consumed);
     }
+
+    workflow_card_reader_flush_audit(now_ms);
 }
 
 void workflow_card_reader_get_state(workflow_card_reader_state_t *out)

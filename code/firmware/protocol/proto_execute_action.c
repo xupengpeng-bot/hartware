@@ -1,331 +1,409 @@
 #include "proto_execute_action.h"
+
+#include "config_store.h"
 #include "proto_codec_json.h"
 #include "proto_command.h"
+#include "runtime_state.h"
+#include "safety_flow.h"
 #include "workflow_control.h"
-#include "workflow_local_access.h"
-#include "workflow_voice.h"
-#include "module_registry.h"
 
-#include "proto_ota.h"
-#include "ota_types.h"
+#include "bsp_uart.h"
+#include "cJSON.h"
 
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
 
-static int str_eq(const char *a, const char *b)
+static void log_json_parse_failure(const char *tag, const char *json, size_t json_len)
 {
-    if (!a || !b) {
-        return 0;
+    char ascii[65];
+    char hex[3 * 24 + 1];
+    char line[256];
+    const char *err_ptr;
+    size_t offset = 0U;
+    size_t dump_len;
+    size_t start;
+    size_t i;
+    size_t ascii_len;
+    size_t hex_pos = 0U;
+
+    if (json == NULL) {
+        return;
     }
-    return strcmp(a, b) == 0;
+
+    err_ptr = cJSON_GetErrorPtr();
+    if (err_ptr != NULL && err_ptr >= json) {
+        size_t candidate = (size_t)(err_ptr - json);
+        if (candidate <= json_len) {
+            offset = candidate;
+        }
+    }
+
+    start = offset > 12U ? (offset - 12U) : 0U;
+    dump_len = json_len - start;
+    if (dump_len > 24U) {
+        dump_len = 24U;
+    }
+
+    ascii_len = dump_len > (sizeof(ascii) - 1U) ? (sizeof(ascii) - 1U) : dump_len;
+    for (i = 0U; i < ascii_len; i++) {
+        unsigned char ch = (unsigned char)json[start + i];
+        ascii[i] = (ch >= 32U && ch <= 126U) ? (char)ch : '.';
+    }
+    ascii[ascii_len] = '\0';
+
+    for (i = 0U; i < dump_len && (hex_pos + 3U) < sizeof(hex); i++) {
+        unsigned char ch = (unsigned char)json[start + i];
+        int wrote = snprintf(hex + hex_pos, sizeof(hex) - hex_pos, "%02X", (unsigned)ch);
+        if (wrote <= 0) {
+            break;
+        }
+        hex_pos += (size_t)wrote;
+        if (i + 1U < dump_len && hex_pos + 1U < sizeof(hex)) {
+            hex[hex_pos++] = ' ';
+        }
+    }
+    hex[hex_pos] = '\0';
+
+    (void)snprintf(line, sizeof(line),
+                   "[PROTO] %s invalid json offset=%lu len=%lu slice=\"%s\" hex=%s\r\n",
+                   tag != NULL ? tag : "json",
+                   (unsigned long)offset,
+                   (unsigned long)json_len,
+                   ascii,
+                   hex);
+    bsp_debug_log(line);
 }
 
-static const char *local_access_decision_label(workflow_local_access_decision_t decision)
+static void read_optional_string(const cJSON *obj, const char *key, char *out, size_t out_cap)
 {
-    switch (decision) {
-    case WORKFLOW_LOCAL_ACCESS_ALLOW_START:
-        return "start_session";
-    case WORKFLOW_LOCAL_ACCESS_ALLOW_STOP:
-        return "stop_session";
-    case WORKFLOW_LOCAL_ACCESS_REJECT_DEBOUNCE:
-        return "rejected_debounce";
-    case WORKFLOW_LOCAL_ACCESS_REJECT_NOT_READY:
-        return "rejected_not_ready";
-    case WORKFLOW_LOCAL_ACCESS_REJECT_BUSY:
-        return "rejected_busy";
-    case WORKFLOW_LOCAL_ACCESS_REJECT_STOP_GUARD:
-        return "rejected_stop_guard";
+    const cJSON *item;
+
+    if (out == NULL || out_cap == 0U) {
+        return;
+    }
+    out[0] = '\0';
+    if (obj == NULL || key == NULL) {
+        return;
+    }
+    item = cJSON_GetObjectItemCaseSensitive((cJSON *)obj, key);
+    if (cJSON_IsString(item) && item->valuestring != NULL) {
+        (void)snprintf(out, out_cap, "%s", item->valuestring);
+    }
+}
+
+static void read_optional_string_alias(const cJSON *obj, const char *primary_key, const char *alias_key,
+                                       char *out, size_t out_cap)
+{
+    read_optional_string(obj, primary_key, out, out_cap);
+    if (out != NULL && out_cap > 0U && out[0] == '\0' && alias_key != NULL) {
+        read_optional_string(obj, alias_key, out, out_cap);
+    }
+}
+
+static int build_action_ack(char *reply, size_t reply_cap, const char *corr, const char *session_ref,
+                            const char *action_code, const char *target_channel_code,
+                            const char *extra_fields_json)
+{
+    const runtime_state_t *rs = runtime_state_get();
+    char local_extra[224];
+    int wrote;
+
+    wrote = snprintf(local_extra, sizeof(local_extra),
+                     "\"ac\":\"%s\",\"wf\":\"%s\"%s%s",
+                     action_code != NULL ? action_code : "",
+                     proto_map_workflow_short_from_runtime(
+                         runtime_state_workflow_name(rs != NULL ? rs->workflow_state : RUNTIME_WORKFLOW_NOT_READY),
+                         (rs != NULL && rs->ready) ? 1U : 0U),
+                     extra_fields_json != NULL && extra_fields_json[0] != '\0' ? "," : "",
+                     extra_fields_json != NULL && extra_fields_json[0] != '\0' ? extra_fields_json : "");
+    if (wrote < 0 || (size_t)wrote >= sizeof(local_extra)) {
+        return -1;
+    }
+    return proto_build_command_ack(reply, reply_cap,
+                                   corr != NULL && corr[0] != '\0' ? corr : NULL,
+                                   session_ref != NULL && session_ref[0] != '\0' ? session_ref : NULL,
+                                   corr != NULL && corr[0] != '\0' ? corr : "action",
+                                   "EXECUTE_ACTION",
+                                   target_channel_code != NULL ? target_channel_code : "controller",
+                                   "accepted",
+                                   local_extra);
+}
+
+static int build_action_nack(char *reply, size_t reply_cap, const char *corr, const char *session_ref,
+                             const char *action_code, const char *reject_code, const char *reason)
+{
+    char extra[64];
+    int wrote;
+
+    wrote = snprintf(extra, sizeof(extra), "\"ac\":\"%s\"", action_code != NULL ? action_code : "");
+    if (wrote < 0 || (size_t)wrote >= sizeof(extra)) {
+        return -1;
+    }
+    return proto_build_command_nack(reply, reply_cap,
+                                    corr != NULL && corr[0] != '\0' ? corr : NULL,
+                                    session_ref != NULL && session_ref[0] != '\0' ? session_ref : NULL,
+                                    corr != NULL && corr[0] != '\0' ? corr : "action",
+                                    "EXECUTE_ACTION",
+                                    reject_code,
+                                    reason,
+                                    extra);
+}
+
+static const char *map_safety_reject_code(int result)
+{
+    const runtime_state_t *rs = runtime_state_get();
+    blocked_reason_code_t blocked = rs != NULL ? rs->blocked_reason : BLOCKED_NONE;
+
+    switch (result) {
+    case -1:
+        return "PARAM_INVALID";
+    case -2:
+        switch (blocked) {
+        case BLOCKED_RESOURCE_BUSY:
+        case BLOCKED_ALREADY_RUNNING:
+            return "DEVICE_BUSY";
+        case BLOCKED_POWER_ABNORMAL:
+        case BLOCKED_OVER_VOLTAGE:
+        case BLOCKED_UNDER_VOLTAGE:
+        case BLOCKED_PHASE_LOSS:
+            return "POWER_NOT_READY";
+        case BLOCKED_PROTECTION_LATCHED:
+        case BLOCKED_PRESSURE_ABNORMAL:
+        case BLOCKED_DRY_RUN_RISK:
+        case BLOCKED_RECOVERY_LOCKED:
+        case BLOCKED_SESSION_LEASE_INVALID:
+            return "SAFETY_INTERLOCK";
+        case BLOCKED_METER_UNAVAILABLE:
+        case BLOCKED_FLOW_SENSOR_UNAVAILABLE:
+        case BLOCKED_NOT_READY_CONFIG:
+            return "MODULE_NOT_ENABLED";
+        default:
+            return "DEVICE_BUSY";
+        }
+    case -3:
+    case -8:
+        return "DEVICE_BUSY";
+    case -9:
+        return "CAPABILITY_NOT_EXPOSED";
     default:
-        return "rejected_invalid";
+        return "CAPABILITY_NOT_EXPOSED";
     }
 }
 
-static int map_ota_action(const char *code, ota_action_code_t *out)
+static int require_target(const char *target, const char *expected)
 {
-    if (str_eq(code, "ota_prepare")) {
-        *out = OTA_ACTION_PREPARE;
-        return 0;
-    }
-    if (str_eq(code, "ota_start")) {
-        *out = OTA_ACTION_START;
-        return 0;
-    }
-    if (str_eq(code, "ota_cancel")) {
-        *out = OTA_ACTION_CANCEL;
-        return 0;
-    }
-    if (str_eq(code, "ota_commit")) {
-        *out = OTA_ACTION_COMMIT;
-        return 0;
-    }
-    if (str_eq(code, "ota_rollback")) {
-        *out = OTA_ACTION_ROLLBACK;
-        return 0;
-    }
-    return -1;
-}
-
-static int fill_ota_prepare_from_json(const char *json, ota_prepare_payload_t *p)
-{
-    memset(p, 0, sizeof(*p));
-    (void)proto_json_get_string(json, "target_version", p->target_version, sizeof(p->target_version));
-    (void)proto_json_get_string(json, "package_url", p->package_url, sizeof(p->package_url));
-    {
-        uint32_t sz = 0U;
-        (void)proto_json_get_u32(json, "package_size", &sz);
-        p->package_size = sz;
-    }
-    (void)proto_json_get_string(json, "package_sha256", p->package_sha256_hex, sizeof(p->package_sha256_hex));
-    (void)proto_json_get_string(json, "package_format", p->package_format, sizeof(p->package_format));
-    {
-        uint32_t mb = 0U;
-        if (proto_json_get_u32(json, "min_battery_soc", &mb) == 0) {
-            p->min_battery_soc = (uint8_t)(mb > 255U ? 255U : mb);
-        }
-    }
-    {
-        int32_t csq = 0;
-        if (proto_json_get_i32(json, "min_signal_csq", &csq) == 0) {
-            p->min_signal_csq = (int16_t)csq;
-        }
-    }
-    {
-        uint32_t force_upgrade = 0U;
-        if (proto_json_get_u32(json, "force_upgrade", &force_upgrade) == 0) {
-            p->force_upgrade = force_upgrade != 0U;
-        }
-    }
-    {
-        uint32_t allow_running_upgrade = 0U;
-        if (proto_json_get_u32(json, "allow_running_upgrade", &allow_running_upgrade) == 0) {
-            p->allow_running_upgrade = allow_running_upgrade != 0U;
-        }
-    }
-    {
-        uint32_t auto_commit = 0U;
-        if (proto_json_get_u32(json, "auto_commit", &auto_commit) == 0) {
-            p->auto_commit = auto_commit != 0U;
-        }
-    }
-    (void)proto_json_get_string(json, "upgrade_ticket", p->upgrade_ticket, sizeof(p->upgrade_ticket));
-    return 0;
+    return target != NULL && expected != NULL && strcmp(target, expected) == 0 ? 0 : -1;
 }
 
 int proto_execute_action_handle(const char *json, size_t json_len, char *reply, size_t reply_cap)
 {
+    cJSON *root = NULL;
+    cJSON *payload = NULL;
+    cJSON *params = NULL;
+    const device_config_t *cfg = NULL;
     char corr[48];
     char session_ref[64];
-    char scope[24];
-    char action[48];
+    char scope[16];
+    char action[16];
+    char target[32];
+    char extra[160];
+    char *params_json = NULL;
+    int result;
 
     (void)json_len;
-    if (!json || !reply || reply_cap < 128U) {
+
+    if (json == NULL || reply == NULL || reply_cap < 96U) {
         return -1;
     }
 
     corr[0] = '\0';
     session_ref[0] = '\0';
-    (void)proto_json_get_string(json, "correlation_id", corr, sizeof(corr));
-    (void)proto_json_get_string(json, "session_ref", session_ref, sizeof(session_ref));
-    if (session_ref[0] == '\0') {
-        (void)proto_json_get_string(json, "session_id", session_ref, sizeof(session_ref));
+    scope[0] = '\0';
+    action[0] = '\0';
+    target[0] = '\0';
+    extra[0] = '\0';
+
+    root = cJSON_ParseWithLength(json, json_len);
+    if (root == NULL || !cJSON_IsObject(root)) {
+        if (root != NULL) {
+            cJSON_Delete(root);
+        }
+        log_json_parse_failure("EX", json, json_len);
+        return build_action_nack(reply, reply_cap, NULL, NULL, "", "PARAM_INVALID", "invalid json");
     }
-    if (proto_json_get_string(json, "scope", scope, sizeof(scope)) != 0) {
-        return proto_build_command_nack(reply, reply_cap, corr, session_ref[0] ? session_ref : NULL, -1, "missing scope");
-    }
-    if (proto_json_get_string(json, "action_code", action, sizeof(action)) != 0) {
-        return proto_build_command_nack(reply, reply_cap, corr, session_ref[0] ? session_ref : NULL, -2, "missing action_code");
-    }
+    read_optional_string(root, "c", corr, sizeof(corr));
+    read_optional_string(root, "r", session_ref, sizeof(session_ref));
 
-    if (str_eq(scope, "workflow")) {
-        if (str_eq(action, "start_session")) {
-            char                       resolved_session_ref[MODEL_SESSION_ID_LEN];
-            bool                       idempotent = false;
-            int                        result;
-            char                       extra[256];
-
-            memset(resolved_session_ref, 0, sizeof(resolved_session_ref));
-            result = workflow_control_start_session(session_ref[0] ? session_ref : NULL, resolved_session_ref,
-                                                    sizeof(resolved_session_ref), &idempotent);
-            if (result < 0) {
-                return proto_build_command_nack(reply, reply_cap, corr,
-                                               resolved_session_ref[0] ? resolved_session_ref : (session_ref[0] ? session_ref : NULL),
-                                               result, workflow_control_error_message(result));
-            }
-            (void)snprintf(extra, sizeof(extra),
-                           "\"command_code\":\"START_SESSION\",\"action_code\":\"start_session\","
-                           "\"workflow_state\":\"%s\",\"idempotent\":%s",
-                           workflow_control_state_label(workflow_engine_get_state()),
-                           idempotent ? "true" : "false");
-            return proto_build_command_ack(reply, reply_cap, corr, resolved_session_ref, extra);
-        }
-
-        if (str_eq(action, "stop_session")) {
-            bool idempotent = false;
-            int  result = workflow_control_stop_session(session_ref[0] ? session_ref : NULL, &idempotent);
-            char extra[256];
-
-            if (result < 0) {
-                return proto_build_command_nack(reply, reply_cap, corr, session_ref[0] ? session_ref : NULL, result,
-                                               workflow_control_error_message(result));
-            }
-            (void)snprintf(extra, sizeof(extra),
-                           "\"command_code\":\"STOP_SESSION\",\"action_code\":\"stop_session\","
-                           "\"workflow_state\":\"%s\",\"idempotent\":%s",
-                           workflow_control_state_label(workflow_engine_get_state()),
-                           idempotent ? "true" : "false");
-            return proto_build_command_ack(reply, reply_cap, corr, session_ref[0] ? session_ref : NULL, extra);
-        }
-
-        if (str_eq(action, "pause_session")) {
-            int result = workflow_engine_request_pause_session();
-            if (result != WORKFLOW_REQ_OK) {
-                return proto_build_command_nack(reply, reply_cap, corr, session_ref[0] ? session_ref : NULL, result,
-                                               workflow_control_error_message(result));
-            }
-            workflow_voice_prompt_once("irrigation_paused", "workflow_pause", 1000U);
-            return proto_build_command_ack(reply, reply_cap, corr, session_ref[0] ? session_ref : NULL,
-                                           "\"action_code\":\"pause_session\",\"workflow_state\":\"paused\"");
-        }
-
-        if (str_eq(action, "resume_session")) {
-            int result = workflow_engine_request_resume_session();
-            if (result != WORKFLOW_REQ_OK) {
-                return proto_build_command_nack(reply, reply_cap, corr, session_ref[0] ? session_ref : NULL, result,
-                                               workflow_control_error_message(result));
-            }
-            workflow_voice_prompt_once("irrigation_resumed", "workflow_resume", 1000U);
-            return proto_build_command_ack(reply, reply_cap, corr, session_ref[0] ? session_ref : NULL,
-                                           "\"action_code\":\"resume_session\",\"workflow_state\":\"running\"");
-        }
-
-        if (str_eq(action, "local_access_submit")) {
-            char                             access_token[WORKFLOW_LOCAL_ACCESS_TOKEN_LEN];
-            char                             access_source[WORKFLOW_LOCAL_ACCESS_SOURCE_LEN];
-            char                             access_reason[WORKFLOW_LOCAL_ACCESS_REASON_LEN];
-            char                             access_session_ref[MODEL_SESSION_ID_LEN];
-            bool                             idempotent = false;
-            workflow_local_access_decision_t decision;
-            char                             extra[320];
-
-            if (proto_json_get_string(json, "access_token", access_token, sizeof(access_token)) != 0) {
-                return proto_build_command_nack(reply, reply_cap, corr, session_ref[0] ? session_ref : NULL, -14,
-                                               "missing access_token");
-            }
-            access_source[0] = '\0';
-            access_reason[0] = '\0';
-            access_session_ref[0] = '\0';
-            (void)proto_json_get_string(json, "access_source", access_source, sizeof(access_source));
-
-            decision = workflow_local_access_submit_token(access_token, access_source, access_reason,
-                                                          sizeof(access_reason), access_session_ref,
-                                                          sizeof(access_session_ref), &idempotent);
-            if (decision < 0) {
-                return proto_build_command_nack(reply, reply_cap, corr,
-                                               access_session_ref[0] ? access_session_ref : (session_ref[0] ? session_ref : NULL),
-                                               decision, access_reason[0] ? access_reason : "local access rejected");
-            }
-
-            (void)snprintf(extra, sizeof(extra),
-                           "\"action_code\":\"local_access_submit\","
-                           "\"access_decision\":\"%s\","
-                           "\"access_reason\":\"%s\","
-                           "\"workflow_state\":\"%s\","
-                           "\"idempotent\":%s",
-                           local_access_decision_label(decision),
-                           access_reason,
-                           workflow_control_state_label(workflow_engine_get_state()),
-                           idempotent ? "true" : "false");
-            return proto_build_command_ack(reply, reply_cap, corr,
-                                           access_session_ref[0] ? access_session_ref : (session_ref[0] ? session_ref : NULL),
-                                           extra);
-        }
-
-        return proto_build_command_nack(reply, reply_cap, corr, session_ref[0] ? session_ref : NULL, -9,
-                                       "unknown workflow action");
+    payload = cJSON_GetObjectItemCaseSensitive(root, "p");
+    if (!cJSON_IsObject(payload)) {
+        cJSON_Delete(root);
+        return build_action_nack(reply, reply_cap, corr, session_ref, "", "PARAM_INVALID", "missing payload");
     }
 
-    if (str_eq(scope, "common")) {
-        if (str_eq(action, "play_voice_prompt")) {
-            char     prompt_code[WORKFLOW_VOICE_PROMPT_LEN];
-            char     prompt_source[WORKFLOW_VOICE_SOURCE_LEN];
-            uint32_t min_gap_ms = 0U;
-            uint32_t clear_queue = 0U;
-            char     extra[192];
-
-            if (proto_json_get_string(json, "prompt_code", prompt_code, sizeof(prompt_code)) != 0) {
-                return proto_build_command_nack(reply, reply_cap, corr, session_ref[0] ? session_ref : NULL, -15,
-                                               "missing prompt_code");
-            }
-            prompt_source[0] = '\0';
-            (void)proto_json_get_string(json, "prompt_source", prompt_source, sizeof(prompt_source));
-            (void)proto_json_get_u32(json, "min_gap_ms", &min_gap_ms);
-            (void)proto_json_get_u32(json, "clear_queue", &clear_queue);
-
-            if (clear_queue != 0U) {
-                workflow_voice_clear();
-            }
-            workflow_voice_prompt_once(prompt_code, prompt_source[0] != '\0' ? prompt_source : "platform_voice",
-                                       min_gap_ms);
-            (void)snprintf(extra, sizeof(extra),
-                           "\"action_code\":\"play_voice_prompt\",\"prompt_code\":\"%s\"",
-                           prompt_code);
-            return proto_build_command_ack(reply, reply_cap, corr, session_ref[0] ? session_ref : NULL, extra);
-        }
-
-        ota_action_code_t oa = OTA_ACTION_PREPARE;
-        if (map_ota_action(action, &oa) == 0) {
-            ota_prepare_payload_t pay;
-            const ota_prepare_payload_t *prepare_payload;
-            int                         result;
-            char                        extra[192];
-
-            fill_ota_prepare_from_json(json, &pay);
-            prepare_payload = (oa == OTA_ACTION_PREPARE) ? &pay : NULL;
-            result = proto_ota_execute_action(oa, prepare_payload);
-            if (result != 0) {
-                return proto_build_command_nack(reply, reply_cap, corr, session_ref[0] ? session_ref : NULL, result,
-                                               "ota rejected");
-            }
-            (void)snprintf(extra, sizeof(extra), "\"action_code\":\"%s\",\"ota\":\"accepted\"", action);
-            return proto_build_command_ack(reply, reply_cap, corr, session_ref[0] ? session_ref : NULL, extra);
-        }
-        return proto_build_command_nack(reply, reply_cap, corr, session_ref[0] ? session_ref : NULL, -10,
-                                       "unknown common action");
+    read_optional_string_alias(payload, "sc", "scope", scope, sizeof(scope));
+    read_optional_string_alias(payload, "ac", "action_code", action, sizeof(action));
+    read_optional_string_alias(payload, "tr", "target_ref", target, sizeof(target));
+    params = cJSON_GetObjectItemCaseSensitive(payload, "pm");
+    if (params == NULL) {
+        params = cJSON_GetObjectItemCaseSensitive(payload, "params");
+    }
+    if (params != NULL && !cJSON_IsObject(params)) {
+        cJSON_Delete(root);
+        return build_action_nack(reply, reply_cap, corr, session_ref, action, "PARAM_INVALID", "pm must be object");
+    }
+    if (scope[0] == '\0' || action[0] == '\0') {
+        cJSON_Delete(root);
+        return build_action_nack(reply, reply_cap, corr, session_ref, action, "PARAM_INVALID", "missing sc or ac");
+    }
+    cfg = config_store_active();
+    if (params != NULL) {
+        params_json = cJSON_PrintUnformatted(params);
     }
 
-    if (str_eq(scope, "module")) {
-        char                module_code[48];
-        char                target_ref[48];
-        const module_ops_t *module;
-        uint8_t             exec_result;
-        char                extra[192];
+    if (strcmp(scope, "cm") == 0 && strcmp(action, "ppu") == 0) {
+        char prompt_code[40];
+        char prompt_json[96];
 
-        if (proto_json_get_string(json, "module_code", module_code, sizeof(module_code)) != 0) {
-            return proto_build_command_nack(reply, reply_cap, corr, session_ref[0] ? session_ref : NULL, -11,
-                                           "missing module_code");
+        (void)snprintf(prompt_code, sizeof(prompt_code), "platform_prompt");
+        if (params != NULL) {
+            read_optional_string(params, "pc", prompt_code, sizeof(prompt_code));
         }
-
-        module = module_registry_get(module_code);
-        if (!module || !module->execute_action) {
-            return proto_build_command_nack(reply, reply_cap, corr, session_ref[0] ? session_ref : NULL, -12,
-                                           "module not found");
+        (void)snprintf(prompt_json, sizeof(prompt_json), "{\"prompt_code\":\"%s\"}", prompt_code);
+        result = safety_flow_execute_action("voice_broadcast", prompt_json, extra, sizeof(extra));
+        if (params_json != NULL) {
+            cJSON_free(params_json);
         }
-
-        target_ref[0] = '\0';
-        (void)proto_json_get_string(json, "target_ref", target_ref, sizeof(target_ref));
-        exec_result = module->execute_action(action, target_ref[0] ? target_ref : NULL, NULL);
-        if (exec_result != 0U) {
-            return proto_build_command_nack(reply, reply_cap, corr, session_ref[0] ? session_ref : NULL, -13,
-                                           "module action failed");
+        cJSON_Delete(root);
+        if (result != 0) {
+            return build_action_nack(reply, reply_cap, corr, session_ref,
+                                     action, map_safety_reject_code(result), safety_flow_error_message(result));
         }
-
-        (void)snprintf(extra, sizeof(extra),
-                       "\"action_code\":\"%s\",\"module_code\":\"%s\",\"module\":\"ok\"",
-                       action, module_code);
-        return proto_build_command_ack(reply, reply_cap, corr, session_ref[0] ? session_ref : NULL, extra);
+        return build_action_ack(reply, reply_cap, corr, session_ref, action, "controller", NULL);
     }
 
-    return proto_build_command_nack(reply, reply_cap, corr, session_ref[0] ? session_ref : NULL, -99,
-                                   "unsupported scope");
+    if (strcmp(scope, "wf") == 0 && strcmp(action, "pas") == 0) {
+        result = workflow_engine_request_pause_session();
+        if (params_json != NULL) {
+            cJSON_free(params_json);
+        }
+        cJSON_Delete(root);
+        if (result != WORKFLOW_REQ_OK) {
+            return build_action_nack(reply, reply_cap, corr, session_ref, action, "DEVICE_BUSY",
+                                     workflow_control_error_message(result));
+        }
+        return build_action_ack(reply, reply_cap, corr, session_ref, action, "controller", NULL);
+    }
+
+    if (strcmp(scope, "wf") == 0 && strcmp(action, "res") == 0) {
+        result = workflow_engine_request_resume_session();
+        if (params_json != NULL) {
+            cJSON_free(params_json);
+        }
+        cJSON_Delete(root);
+        if (result != WORKFLOW_REQ_OK) {
+            return build_action_nack(reply, reply_cap, corr, session_ref, action, "DEVICE_BUSY",
+                                     workflow_control_error_message(result));
+        }
+        return build_action_ack(reply, reply_cap, corr, session_ref, action, "controller", NULL);
+    }
+
+    if (strcmp(scope, "md") == 0 && strcmp(action, "spu") == 0) {
+        if (require_target(target, "pump_1") != 0) {
+            if (params_json != NULL) {
+                cJSON_free(params_json);
+            }
+            cJSON_Delete(root);
+            return build_action_nack(reply, reply_cap, corr, session_ref, action, "PARAM_INVALID", "tr must be pump_1");
+        }
+        result = safety_flow_execute_action("start_pump", params_json, extra, sizeof(extra));
+        if (params_json != NULL) {
+            cJSON_free(params_json);
+        }
+        cJSON_Delete(root);
+        if (result != 0) {
+            return build_action_nack(reply, reply_cap, corr, session_ref,
+                                     action, map_safety_reject_code(result), safety_flow_error_message(result));
+        }
+        return build_action_ack(reply, reply_cap, corr, session_ref, action, "pump_1", NULL);
+    }
+
+    if (strcmp(scope, "md") == 0 && strcmp(action, "tpu") == 0) {
+        if (require_target(target, "pump_1") != 0) {
+            if (params_json != NULL) {
+                cJSON_free(params_json);
+            }
+            cJSON_Delete(root);
+            return build_action_nack(reply, reply_cap, corr, session_ref, action, "PARAM_INVALID", "tr must be pump_1");
+        }
+        result = safety_flow_execute_action("stop_pump", params_json, extra, sizeof(extra));
+        if (params_json != NULL) {
+            cJSON_free(params_json);
+        }
+        cJSON_Delete(root);
+        if (result != 0) {
+            return build_action_nack(reply, reply_cap, corr, session_ref,
+                                     action, map_safety_reject_code(result), safety_flow_error_message(result));
+        }
+        return build_action_ack(reply, reply_cap, corr, session_ref, action, "pump_1", NULL);
+    }
+
+    if (strcmp(scope, "md") == 0 && strcmp(action, "ovl") == 0) {
+        if (require_target(target, "valve_1") != 0) {
+            if (params_json != NULL) {
+                cJSON_free(params_json);
+            }
+            cJSON_Delete(root);
+            return build_action_nack(reply, reply_cap, corr, session_ref, action, "PARAM_INVALID", "tr must be valve_1");
+        }
+        if (cfg == NULL || cfg->feature_modules.single_valve_control == 0U) {
+            if (params_json != NULL) {
+                cJSON_free(params_json);
+            }
+            cJSON_Delete(root);
+            return build_action_nack(reply, reply_cap, corr, session_ref, action, "MODULE_NOT_ENABLED", "valve module disabled");
+        }
+        result = safety_flow_execute_action("open_valve", params_json, extra, sizeof(extra));
+        if (params_json != NULL) {
+            cJSON_free(params_json);
+        }
+        cJSON_Delete(root);
+        if (result != 0) {
+            return build_action_nack(reply, reply_cap, corr, session_ref,
+                                     action, map_safety_reject_code(result), safety_flow_error_message(result));
+        }
+        return build_action_ack(reply, reply_cap, corr, session_ref, action, "valve_1", NULL);
+    }
+
+    if (strcmp(scope, "md") == 0 && strcmp(action, "cvl") == 0) {
+        if (require_target(target, "valve_1") != 0) {
+            if (params_json != NULL) {
+                cJSON_free(params_json);
+            }
+            cJSON_Delete(root);
+            return build_action_nack(reply, reply_cap, corr, session_ref, action, "PARAM_INVALID", "tr must be valve_1");
+        }
+        if (cfg == NULL || cfg->feature_modules.single_valve_control == 0U) {
+            if (params_json != NULL) {
+                cJSON_free(params_json);
+            }
+            cJSON_Delete(root);
+            return build_action_nack(reply, reply_cap, corr, session_ref, action, "MODULE_NOT_ENABLED", "valve module disabled");
+        }
+        result = safety_flow_execute_action("close_valve", params_json, extra, sizeof(extra));
+        if (params_json != NULL) {
+            cJSON_free(params_json);
+        }
+        cJSON_Delete(root);
+        if (result != 0) {
+            return build_action_nack(reply, reply_cap, corr, session_ref,
+                                     action, map_safety_reject_code(result), safety_flow_error_message(result));
+        }
+        return build_action_ack(reply, reply_cap, corr, session_ref, action, "valve_1", NULL);
+    }
+
+    if (params_json != NULL) {
+        cJSON_free(params_json);
+    }
+    cJSON_Delete(root);
+    return build_action_nack(reply, reply_cap, corr, session_ref, action, "UNSUPPORTED_COMMAND", "unsupported action");
 }

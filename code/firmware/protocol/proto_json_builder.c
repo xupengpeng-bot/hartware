@@ -1,7 +1,6 @@
 #include "proto_json_builder.h"
 #include "proto_envelope.h"
 #include "common_identity.h"
-#include "bsp_rtc.h"
 #include "cJSON.h"
 
 #include <ctype.h>
@@ -9,22 +8,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-static int build_ts(char *ts, size_t cap)
-{
-    if (bsp_rtc_now_iso8601(ts, cap, NULL) == 0) {
-        return 0;
-    }
-    if (cap > 0U) {
-        ts[0] = '\0';
-    }
-    return -1;
-}
-
 static int require_nonempty_json_string(const char *json, const char *key)
 {
     char pattern[48];
     const char *p;
     size_t klen;
+
     if (json == NULL || key == NULL) {
         return -1;
     }
@@ -119,23 +108,23 @@ int proto_json_validate_minimal_required(const char *json, size_t len)
     if (brace_depth != 0 || bracket_depth != 0) {
         return -6;
     }
-    if (require_nonempty_json_string(json, "protocol") != 0) {
+    if (strstr(json, "\"v\"") == NULL) {
         return -7;
     }
-    if (require_nonempty_json_string(json, "type") != 0) {
+    if (require_nonempty_json_string(json, "t") != 0) {
         return -8;
     }
-    if (require_nonempty_json_string(json, "imei") != 0) {
+    if (require_nonempty_json_string(json, "i") != 0) {
         return -9;
     }
-    if (require_nonempty_json_string(json, "msg_id") != 0) {
+    if (require_nonempty_json_string(json, "m") != 0) {
         return -10;
     }
-    if (strstr(json, "\"seq\"") == NULL) {
+    if (strstr(json, "\"s\"") == NULL) {
         return -11;
     }
-    if (strstr(json, "\"payload\"") == NULL) {
-        return -12;
+    if (strstr(json, "\"p\"") == NULL) {
+        return -15;
     }
     return 0;
 }
@@ -146,58 +135,53 @@ int proto_json_build_message(char *buf, size_t cap, const char *msg_type, uint32
     cJSON *root = NULL;
     cJSON *payload_obj = payload;
     const controller_identity_t *id = common_identity_get();
-    char msg_id[96];
-    char ts[32];
+    char msg_id[16];
     uint32_t seq;
-    int ok;
     int rc = -1;
 
     if (buf == NULL || cap < 64U || msg_type == NULL || id == NULL || id->imei[0] == '\0') {
         return -1;
     }
+
     seq = proto_envelope_take_seq_no(seq_no);
-    (void)snprintf(msg_id, sizeof(msg_id), "%s-%lu", id->imei, (unsigned long)seq);
-    if (build_ts(ts, sizeof(ts)) != 0) {
-        return -2;
-    }
+    (void)snprintf(msg_id, sizeof(msg_id), "%06lu", (unsigned long)seq);
 
     root = cJSON_CreateObject();
     if (root == NULL) {
-        return -3;
+        return -2;
     }
     if (payload_obj == NULL) {
         payload_obj = cJSON_CreateObject();
         if (payload_obj == NULL) {
             cJSON_Delete(root);
-            return -4;
+            return -3;
         }
     }
 
-    ok = cJSON_AddStringToObject(root, "protocol", PROTO_PROTOCOL_NAME) != NULL &&
-         cJSON_AddStringToObject(root, "type", msg_type) != NULL &&
-         cJSON_AddStringToObject(root, "imei", id->imei) != NULL &&
-         cJSON_AddStringToObject(root, "msg_id", msg_id) != NULL &&
-         cJSON_AddNumberToObject(root, "seq", (double)seq) != NULL &&
-         cJSON_AddStringToObject(root, "ts", ts) != NULL;
-    if (!ok) {
+    if (cJSON_AddNumberToObject(root, "v", 1.0) == NULL ||
+        cJSON_AddStringToObject(root, "t", msg_type) == NULL ||
+        cJSON_AddStringToObject(root, "i", id->imei) == NULL ||
+        cJSON_AddStringToObject(root, "m", msg_id) == NULL ||
+        cJSON_AddNumberToObject(root, "s", (double)seq) == NULL) {
         cJSON_Delete(payload_obj);
         cJSON_Delete(root);
-        return -5;
+        return -4;
     }
-    if (correlation_id != NULL && correlation_id[0] != '\0' &&
-        cJSON_AddStringToObject(root, "correlation_id", correlation_id) == NULL) {
-        cJSON_Delete(payload_obj);
-        cJSON_Delete(root);
-        return -6;
+    if (correlation_id != NULL && correlation_id[0] != '\0') {
+        if (cJSON_AddStringToObject(root, "c", correlation_id) == NULL) {
+            cJSON_Delete(payload_obj);
+            cJSON_Delete(root);
+            return -6;
+        }
     }
-    if (session_ref != NULL && session_ref[0] != '\0' &&
-        cJSON_AddStringToObject(root, "session_ref", session_ref) == NULL) {
-        cJSON_Delete(payload_obj);
-        cJSON_Delete(root);
-        return -7;
+    if (session_ref != NULL && session_ref[0] != '\0') {
+        if (cJSON_AddStringToObject(root, "r", session_ref) == NULL) {
+            cJSON_Delete(payload_obj);
+            cJSON_Delete(root);
+            return -7;
+        }
     }
-    cJSON_AddItemToObject(root, "payload", payload_obj);
-    payload_obj = NULL;
+    cJSON_AddItemToObject(root, "p", payload_obj);
 
     buf[0] = '\0';
     if (!cJSON_PrintPreallocated(root, buf, (int)cap, 0)) {

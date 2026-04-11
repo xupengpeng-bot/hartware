@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 #define NET_SOCKET_CLIENT_HOST_MAX 96U
-#define NET_SOCKET_CLIENT_RX_MAX   4608U
+#define NET_SOCKET_CLIENT_RX_MAX   1536U
 
 typedef struct {
     uint8_t  rx[NET_SOCKET_CLIENT_RX_MAX];

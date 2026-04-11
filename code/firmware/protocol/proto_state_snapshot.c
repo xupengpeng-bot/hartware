@@ -1,173 +1,263 @@
 #include "proto_state_snapshot.h"
-#include "proto_json_builder.h"
-#include "proto_envelope.h"
-#include "common_status.h"
-#include "workflow_engine.h"
-#include "workflow_voice.h"
-#include "module_pressure.h"
-#include "module_flow.h"
-#include "module_pump_vfd.h"
-#include "cJSON.h"
 
-static const char *workflow_state_str(workflow_state_t st)
+#include "config_store.h"
+#include "module_meter.h"
+#include "proto_codec_json.h"
+#include "proto_envelope.h"
+#include "runtime_state.h"
+
+#include <stddef.h>
+#include <string.h>
+
+static int append_string_field(json_buf_t *jb, const char *key, const char *value)
 {
-    switch (st) {
-    case WF_BOOTING: return "booting";
-    case WF_ONLINE_NOT_READY: return "online_not_ready";
-    case WF_READY_IDLE: return "ready_idle";
-    case WF_STARTING: return "starting";
-    case WF_RUNNING: return "running";
-    case WF_PAUSING: return "pausing";
-    case WF_PAUSED: return "paused";
-    case WF_RESUMING: return "resuming";
-    case WF_STOPPING: return "stopping";
-    case WF_STOPPED: return "stopped";
-    case WF_ERROR_STOP: return "error_stop";
-    default: return "unknown";
+    if (jb == NULL || key == NULL || value == NULL) {
+        return -1;
     }
+    if (json_buf_append(jb, "\"") != 0 ||
+        json_buf_append(jb, key) != 0 ||
+        json_buf_append(jb, "\":\"") != 0 ||
+        json_escape_append(jb, value) != 0 ||
+        json_buf_append(jb, "\"") != 0) {
+        return -1;
+    }
+    return 0;
 }
 
-static cJSON *build_controller_state_json(const common_status_t *cs)
+static int append_u32_field(json_buf_t *jb, const char *key, uint32_t value)
 {
-    device_runtime_t *rt = workflow_engine_runtime();
-    cJSON *obj = cJSON_CreateObject();
-    if (obj == NULL) {
+    if (jb == NULL || key == NULL) {
+        return -1;
+    }
+    if (json_buf_append(jb, "\"") != 0 ||
+        json_buf_append(jb, key) != 0 ||
+        json_buf_append(jb, "\":") != 0) {
+        return -1;
+    }
+    return json_buf_append_fmt(jb, "%lu", (unsigned long)value);
+}
+
+static int append_fixed_field(json_buf_t *jb, const char *key, float value, uint8_t frac_digits)
+{
+    if (jb == NULL || key == NULL) {
+        return -1;
+    }
+    if (json_buf_append(jb, "\"") != 0 ||
+        json_buf_append(jb, key) != 0 ||
+        json_buf_append(jb, "\":") != 0) {
+        return -1;
+    }
+    return json_buf_append_fixed(jb, value, frac_digits);
+}
+
+static int append_optional_separator(json_buf_t *jb, uint8_t *first)
+{
+    if (jb == NULL || first == NULL) {
+        return -1;
+    }
+    if (*first == 0U) {
+        return json_buf_append(jb, ",");
+    }
+    *first = 0U;
+    return 0;
+}
+
+static const char *breaker_state_value(const runtime_state_t *rs)
+{
+    const device_config_t *cfg = config_store_active();
+
+    if (cfg == NULL || cfg->feature_modules.breaker_feedback_monitor == 0U) {
         return NULL;
     }
-    if (cJSON_AddBoolToObject(obj, "registered_once", cs->registered_once) == NULL ||
-        cJSON_AddStringToObject(obj, "workflow_state", workflow_state_str(workflow_engine_get_state())) == NULL ||
-        cJSON_AddStringToObject(obj, "active_session_id", (rt && rt->active_session.session_id[0] != '\0') ? rt->active_session.session_id : "") == NULL ||
-        cJSON_AddNumberToObject(obj, "active_session_started_at_utc", (double)(rt ? rt->active_session.started_at_utc : 0U)) == NULL ||
-        cJSON_AddBoolToObject(obj, "recovery_pending", (rt && rt->recovery.recovery_pending) ? 1 : 0) == NULL ||
-        cJSON_AddBoolToObject(obj, "settlement_pending", (rt && rt->recovery.settlement_pending) ? 1 : 0) == NULL ||
-        cJSON_AddNumberToObject(obj, "stop_guard_remaining_ms", (double)workflow_engine_stop_guard_remaining_ms()) == NULL ||
-        cJSON_AddNumberToObject(obj, "last_stop_reason_code", (double)(rt ? rt->recovery.last_stop_reason_code : 0U)) == NULL ||
-        cJSON_AddNumberToObject(obj, "last_stop_at_utc", (double)(rt ? rt->recovery.last_stop_at_utc : 0U)) == NULL ||
-        cJSON_AddStringToObject(obj, "last_session_id", (rt && rt->recovery.last_session_id[0] != '\0') ? rt->recovery.last_session_id : "") == NULL ||
-        cJSON_AddNumberToObject(obj, "last_session_started_at_utc", (double)(rt ? rt->recovery.last_session_started_at_utc : 0U)) == NULL ||
-        cJSON_AddStringToObject(obj, "last_recovery_hint", (rt && rt->recovery.last_recovery_hint[0] != '\0') ? rt->recovery.last_recovery_hint : "") == NULL) {
-        cJSON_Delete(obj);
+    if (rs == NULL) {
         return NULL;
     }
-    return obj;
+    return rs->pump_state == RUNTIME_PUMP_RUNNING ? "closed" : "opened";
+}
+
+static const char *meter_protocol_value(const device_config_t *cfg)
+{
+    if (cfg == NULL || cfg->feature_modules.electric_meter_modbus == 0U) {
+        return NULL;
+    }
+    return module_meter_source_name();
+}
+
+static const char *reported_module_code(const char *module_code)
+{
+    if (module_code == NULL) {
+        return NULL;
+    }
+    if (strcmp(module_code, "pump_direct_control") == 0 ||
+        strcmp(module_code, "breaker_control") == 0) {
+        return "breaker_control";
+    }
+    return module_code;
+}
+
+static uint8_t channel_should_emit(const device_config_t *cfg, const channel_binding_t *binding)
+{
+    const char *module_code;
+
+    if (cfg == NULL || binding == NULL || binding->enabled == 0U) {
+        return 0U;
+    }
+    module_code = reported_module_code(binding->module_code);
+    if (module_code == NULL) {
+        return 0U;
+    }
+    if (strcmp(module_code, "breaker_control") == 0) {
+        return cfg->feature_modules.breaker_control != 0U ? 1U : 0U;
+    }
+    if (strcmp(module_code, "card_auth_reader") == 0) {
+        return cfg->feature_modules.card_auth_reader != 0U ? 1U : 0U;
+    }
+    if (strcmp(module_code, "electric_meter_modbus") == 0) {
+        return cfg->feature_modules.electric_meter_modbus != 0U ? 1U : 0U;
+    }
+    return 0U;
+}
+
+static uint8_t snapshot_metric_valid(float value, float min_allowed, float max_allowed)
+{
+    return (value >= min_allowed && value <= max_allowed) ? 1U : 0U;
+}
+
+static int append_channel_state_or_value(json_buf_t *jb, const channel_binding_t *binding, const runtime_state_t *rs)
+{
+    if (jb == NULL || binding == NULL || rs == NULL) {
+        return -1;
+    }
+
+    if (strcmp(reported_module_code(binding->module_code), "breaker_control") == 0 ||
+        strcmp(binding->module_code, "pump_vfd_control") == 0) {
+        return json_buf_append_fmt(jb, ",\"st\":\"%s\"", runtime_state_pump_name(rs->pump_state));
+    }
+    if (strcmp(binding->module_code, "card_auth_reader") == 0) {
+        return json_buf_append_fmt(jb, ",\"st\":\"%s\"", binding->enabled != 0U ? "enabled" : "disabled");
+    }
+    if (strcmp(binding->module_code, "electric_meter_modbus") == 0) {
+        return 0;
+    }
+    return 0;
+}
+
+static int append_channels(json_buf_t *jb, const device_config_t *cfg, const runtime_state_t *rs)
+{
+    uint16_t i;
+    uint8_t emitted = 0U;
+
+    if (jb == NULL || rs == NULL) {
+        return -1;
+    }
+    if (json_buf_append(jb, "\"ch\":[") != 0) {
+        return -1;
+    }
+    if (cfg == NULL) {
+        return json_buf_append(jb, "]");
+    }
+    for (i = 0U; i < cfg->channel_binding_count; i++) {
+        const channel_binding_t *binding = &cfg->channel_bindings[i];
+        const char *module_code = reported_module_code(binding->module_code);
+
+        if (channel_should_emit(cfg, binding) == 0U || module_code == NULL) {
+            continue;
+        }
+        if (emitted != 0U && json_buf_append(jb, ",") != 0) {
+            return -1;
+        }
+        emitted = 1U;
+        if (json_buf_append(jb, "{") != 0 ||
+            json_buf_append_fmt(jb,
+                                "\"mc\":\"%s\",\"cc\":\"%s\",\"ir\":\"%s\",\"en\":%u",
+                                proto_map_module_short(module_code),
+                                binding->channel_code,
+                                binding->io_kind,
+                                binding->enabled != 0U ? 1U : 0U) != 0 ||
+            append_channel_state_or_value(jb, binding, rs) != 0 ||
+            json_buf_append(jb, "}") != 0) {
+            return -1;
+        }
+    }
+    return json_buf_append(jb, "]");
 }
 
 int proto_state_snapshot_build(char *buf, size_t cap)
 {
-    const common_status_t *cs;
-    workflow_voice_state_t voice_state;
-    cJSON *payload = NULL;
-    cJSON *common_status = NULL;
-    cJSON *controller_state = NULL;
-    cJSON *voice = NULL;
-    cJSON *channel_values = NULL;
-    cJSON *item = NULL;
-    float pmpa = 0.0f;
-    float flow = 0.0f;
-    uint8_t pump_st = 0U;
+    json_buf_t jb;
+    const runtime_state_t *rs = runtime_state_get();
+    const device_config_t *cfg = config_store_active();
+    uint8_t meter_valid;
+    uint8_t first = 1U;
 
-    if (buf == NULL || cap < 1024U) {
+    if (buf == NULL || cap < 384U || rs == NULL) {
         return -1;
     }
-    cs = common_status_get();
-    workflow_voice_get_state(&voice_state);
-    (void)module_pressure_get_mpa(&pmpa);
-    (void)module_flow_get_instant(&flow);
-    (void)module_pump_vfd_query_state_u8(&pump_st);
 
-    payload = cJSON_CreateObject();
-    common_status = cJSON_CreateObject();
-    controller_state = build_controller_state_json(cs);
-    voice = cJSON_CreateObject();
-    channel_values = cJSON_CreateArray();
-    if (payload == NULL || common_status == NULL || controller_state == NULL || voice == NULL || channel_values == NULL) {
-        cJSON_Delete(payload);
-        cJSON_Delete(common_status);
-        cJSON_Delete(controller_state);
-        cJSON_Delete(voice);
-        cJSON_Delete(channel_values);
+    meter_valid = (rs->meter_last.valid != 0U) ? 1U : 0U;
+
+    json_buf_init(&jb, buf, cap);
+    if (proto_envelope_append_payload_prefix(&jb, PROTO_MSG_STATE_SNAPSHOT, 0U, NULL, NULL) != 0) {
         return -2;
     }
-
-    if (cJSON_AddBoolToObject(common_status, "online", cs->online) == NULL ||
-        cJSON_AddBoolToObject(common_status, "tcp_connected", cs->tcp_connected) == NULL ||
-        cJSON_AddBoolToObject(common_status, "ready", cs->ready) == NULL ||
-        cJSON_AddNumberToObject(common_status, "config_version", (double)cs->config_version) == NULL ||
-        cJSON_AddNumberToObject(common_status, "signal_csq", (double)cs->signal_csq) == NULL ||
-        cJSON_AddNumberToObject(common_status, "battery_soc", (double)cs->battery_soc) == NULL ||
-        cJSON_AddBoolToObject(voice, "enabled", voice_state.enabled) == NULL ||
-        cJSON_AddBoolToObject(voice, "supported", voice_state.supported) == NULL ||
-        cJSON_AddBoolToObject(voice, "busy", voice_state.busy) == NULL ||
-        cJSON_AddNumberToObject(voice, "queue_depth", (double)voice_state.queue_depth) == NULL ||
-        cJSON_AddStringToObject(voice, "last_prompt", voice_state.last_prompt) == NULL ||
-        cJSON_AddStringToObject(voice, "last_source", voice_state.last_source) == NULL ||
-        cJSON_AddNumberToObject(voice, "last_prompt_at_ms", (double)voice_state.last_prompt_at_ms) == NULL) {
-        cJSON_Delete(payload);
-        cJSON_Delete(common_status);
-        cJSON_Delete(controller_state);
-        cJSON_Delete(voice);
-        cJSON_Delete(channel_values);
-        return -2;
+    if (append_optional_separator(&jb, &first) != 0 ||
+        append_string_field(&jb, "wf",
+                            proto_map_workflow_short_from_runtime(runtime_state_workflow_name(rs->workflow_state),
+                                                                  rs->ready ? 1U : 0U)) != 0 ||
+        append_optional_separator(&jb, &first) != 0 ||
+        append_u32_field(&jb, "rt", rs->runtime_sec) != 0 ||
+        append_optional_separator(&jb, &first) != 0 ||
+        append_u32_field(&jb, "me", rs->meter_epoch) != 0) {
+        return -3;
     }
-
-    item = cJSON_CreateObject();
-    if (item == NULL ||
-        cJSON_AddStringToObject(item, "module_code", "pressure_acquisition") == NULL ||
-        cJSON_AddStringToObject(item, "channel_code", "pressure_1") == NULL ||
-        cJSON_AddStringToObject(item, "metric_code", "pressure_mpa") == NULL ||
-        cJSON_AddNumberToObject(item, "value", (double)pmpa) == NULL ||
-        cJSON_AddStringToObject(item, "unit", "MPa") == NULL ||
-        cJSON_AddStringToObject(item, "quality", "good") == NULL) {
-        cJSON_Delete(item);
-        cJSON_Delete(payload);
-        cJSON_Delete(common_status);
-        cJSON_Delete(controller_state);
-        cJSON_Delete(voice);
-        cJSON_Delete(channel_values);
-        return -2;
+    if (snapshot_metric_valid(rs->total_m3, 0.0f, 10000000.0f) != 0U) {
+        if (append_optional_separator(&jb, &first) != 0 ||
+            append_fixed_field(&jb, "fq", rs->total_m3, 2U) != 0) {
+            return -3;
+        }
     }
-    cJSON_AddItemToArray(channel_values, item);
-
-    item = cJSON_CreateObject();
-    if (item == NULL ||
-        cJSON_AddStringToObject(item, "module_code", "flow_acquisition") == NULL ||
-        cJSON_AddStringToObject(item, "channel_code", "flow_1") == NULL ||
-        cJSON_AddStringToObject(item, "metric_code", "flow_m3h") == NULL ||
-        cJSON_AddNumberToObject(item, "value", (double)flow) == NULL ||
-        cJSON_AddStringToObject(item, "unit", "m3/h") == NULL ||
-        cJSON_AddStringToObject(item, "quality", "good") == NULL) {
-        cJSON_Delete(item);
-        cJSON_Delete(payload);
-        cJSON_Delete(common_status);
-        cJSON_Delete(controller_state);
-        cJSON_Delete(voice);
-        cJSON_Delete(channel_values);
-        return -2;
+    if (meter_valid != 0U && snapshot_metric_valid(rs->voltage_v, 0.0f, 1000.0f) != 0U) {
+        if (append_optional_separator(&jb, &first) != 0 ||
+            append_fixed_field(&jb, "vv", rs->voltage_v, 1U) != 0) {
+            return -3;
+        }
     }
-    cJSON_AddItemToArray(channel_values, item);
-
-    item = cJSON_CreateObject();
-    if (item == NULL ||
-        cJSON_AddStringToObject(item, "module_code", "pump_vfd_control") == NULL ||
-        cJSON_AddStringToObject(item, "channel_code", "pump_state") == NULL ||
-        cJSON_AddStringToObject(item, "metric_code", "pump_state") == NULL ||
-        cJSON_AddNumberToObject(item, "value", (double)pump_st) == NULL ||
-        cJSON_AddNullToObject(item, "unit") == NULL ||
-        cJSON_AddStringToObject(item, "quality", "good") == NULL) {
-        cJSON_Delete(item);
-        cJSON_Delete(payload);
-        cJSON_Delete(common_status);
-        cJSON_Delete(controller_state);
-        cJSON_Delete(voice);
-        cJSON_Delete(channel_values);
-        return -2;
+    if (meter_valid != 0U && snapshot_metric_valid(rs->current_a, 0.0f, 1000.0f) != 0U) {
+        if (append_optional_separator(&jb, &first) != 0 ||
+            append_fixed_field(&jb, "ia", rs->current_a, 1U) != 0) {
+            return -3;
+        }
     }
-    cJSON_AddItemToArray(channel_values, item);
-
-    cJSON_AddItemToObject(payload, "common_status", common_status);
-    cJSON_AddItemToObject(payload, "controller_state", controller_state);
-    cJSON_AddItemToObject(payload, "voice_state", voice);
-    cJSON_AddItemToObject(payload, "channel_values", channel_values);
-
-    return proto_json_build_message(buf, cap, PROTO_MSG_STATE_SNAPSHOT, 0U, NULL, NULL, payload);
+    if (meter_valid != 0U && snapshot_metric_valid(rs->power_kw, 0.0f, 500.0f) != 0U) {
+        if (append_optional_separator(&jb, &first) != 0 ||
+            append_fixed_field(&jb, "pw", rs->power_kw, 1U) != 0) {
+            return -3;
+        }
+    }
+    if (meter_valid != 0U && snapshot_metric_valid(rs->energy_kwh, 0.0f, 10000000.0f) != 0U) {
+        if (append_optional_separator(&jb, &first) != 0 ||
+            append_fixed_field(&jb, "ek", rs->energy_kwh, 1U) != 0) {
+            return -3;
+        }
+    }
+    if (meter_protocol_value(cfg) != NULL) {
+        if (append_optional_separator(&jb, &first) != 0 ||
+            append_string_field(&jb, "mp", meter_protocol_value(cfg)) != 0) {
+            return -3;
+        }
+    }
+    if (breaker_state_value(rs) != NULL) {
+        if (append_optional_separator(&jb, &first) != 0 ||
+            append_string_field(&jb, "brs", breaker_state_value(rs)) != 0) {
+            return -3;
+        }
+    }
+    if (append_optional_separator(&jb, &first) != 0 ||
+        append_channels(&jb, cfg, rs) != 0) {
+        return -3;
+    }
+    if (proto_envelope_close_payload(&jb) != 0) {
+        return -4;
+    }
+    return (int)jb.len;
 }
