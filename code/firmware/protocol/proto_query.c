@@ -5,6 +5,7 @@
 #include "module_meter.h"
 #include "proto_codec_json.h"
 #include "proto_command.h"
+#include "proto_ota.h"
 #include "proto_envelope.h"
 #include "proto_json_builder.h"
 #include "runtime_state.h"
@@ -121,6 +122,33 @@ static int add_string_if_nonempty(cJSON *obj, const char *key, const char *value
     return cJSON_AddStringToObject(obj, key, value) != NULL ? 0 : -1;
 }
 
+static int add_bool_number(cJSON *obj, const char *key, bool value)
+{
+    if (obj == NULL || key == NULL) {
+        return -1;
+    }
+    return cJSON_AddNumberToObject(obj, key, value ? 1.0 : 0.0) != NULL ? 0 : -1;
+}
+
+static int scope_is_common(const char *scope)
+{
+    return scope != NULL && (strcmp(scope, "cm") == 0 || strcmp(scope, "common") == 0);
+}
+
+static int query_code_matches(const char *qcode, const char *short_code, const char *long_code)
+{
+    if (qcode == NULL) {
+        return 0;
+    }
+    if (short_code != NULL && strcmp(qcode, short_code) == 0) {
+        return 1;
+    }
+    if (long_code != NULL && strcmp(qcode, long_code) == 0) {
+        return 1;
+    }
+    return 0;
+}
+
 static const char *resolve_reply_session_ref(const char *explicit_session_ref)
 {
     const runtime_state_t *rs;
@@ -156,6 +184,19 @@ static const char *meter_protocol_value(void)
         return NULL;
     }
     return module_meter_source_name();
+}
+
+static int build_query_result(char *reply, size_t reply_cap,
+                              const char *corr, const char *session_ref,
+                              cJSON *out_payload)
+{
+    int rc;
+
+    rc = proto_json_build_message(reply, reply_cap, PROTO_MSG_QUERY_RESULT, 0U,
+                                  corr[0] != '\0' ? corr : NULL,
+                                  resolve_reply_session_ref(session_ref),
+                                  out_payload);
+    return rc;
 }
 
 static int build_query_nack(char *reply, size_t reply_cap, const char *corr, const char *session_ref,
@@ -240,7 +281,7 @@ int proto_query_handle(const char *json, size_t json_len, char *reply, size_t re
         return build_query_nack(reply, reply_cap, corr, session_ref, scope, qcode, "DEVICE_BUSY", "runtime not ready");
     }
 
-    if (strcmp(scope, "cm") == 0 && strcmp(qcode, "qcs") == 0) {
+    if (scope_is_common(scope) && query_code_matches(qcode, "qcs", NULL)) {
         cJSON *out_payload = cJSON_CreateObject();
         uint8_t signal_valid = (rs->signal_csq >= 0 && rs->signal_csq <= 99) ? 1U : 0U;
         uint8_t battery_v_valid = (cs->battery_voltage_v >= 0.1f && cs->battery_voltage_v <= 64.0f) ? 1U : 0U;
@@ -275,11 +316,9 @@ int proto_query_handle(const char *json, size_t json_len, char *reply, size_t re
             cJSON_Delete(out_payload);
             return build_query_nack(reply, reply_cap, corr, session_ref, scope, qcode, "DEVICE_BUSY", "build qcs failed");
         }
-        rc = proto_json_build_message(reply, reply_cap, PROTO_MSG_QUERY_RESULT, 0U,
-                                      corr[0] != '\0' ? corr : NULL,
-                                      resolve_reply_session_ref(session_ref),
-                                      out_payload);
+        rc = build_query_result(reply, reply_cap, corr, session_ref, out_payload);
         cJSON_Delete(root);
+        cJSON_Delete(out_payload);
         return rc >= 0 ? rc : build_query_nack(reply, reply_cap, corr, session_ref, scope, qcode, "DEVICE_BUSY", "send qcs failed");
     }
 
@@ -304,7 +343,7 @@ int proto_query_handle(const char *json, size_t json_len, char *reply, size_t re
         return rc >= 0 ? rc : build_query_nack(reply, reply_cap, corr, session_ref, scope, qcode, "DEVICE_BUSY", "send qwf failed");
     }
 
-    if (strcmp(scope, "cm") == 0 && strcmp(qcode, "qem") == 0) {
+    if (scope_is_common(scope) && query_code_matches(qcode, "qem", NULL)) {
         cJSON *out_payload = cJSON_CreateObject();
 
         if (out_payload == NULL ||
@@ -331,12 +370,66 @@ int proto_query_handle(const char *json, size_t json_len, char *reply, size_t re
             cJSON_Delete(out_payload);
             return build_query_nack(reply, reply_cap, corr, session_ref, scope, qcode, "DEVICE_BUSY", "build qem failed");
         }
-        rc = proto_json_build_message(reply, reply_cap, PROTO_MSG_QUERY_RESULT, 0U,
-                                      corr[0] != '\0' ? corr : NULL,
-                                      resolve_reply_session_ref(session_ref),
-                                      out_payload);
+        rc = build_query_result(reply, reply_cap, corr, session_ref, out_payload);
         cJSON_Delete(root);
+        cJSON_Delete(out_payload);
         return rc >= 0 ? rc : build_query_nack(reply, reply_cap, corr, session_ref, scope, qcode, "DEVICE_BUSY", "send qem failed");
+    }
+
+    if (scope_is_common(scope) && query_code_matches(qcode, "qgs", NULL)) {
+        cJSON *out_payload = cJSON_CreateObject();
+        ota_upgrade_status_t status;
+
+        if (proto_ota_query_upgrade_status(&status) != 0 ||
+            out_payload == NULL ||
+            cJSON_AddStringToObject(out_payload, "sc", scope) == NULL ||
+            cJSON_AddStringToObject(out_payload, "qc", qcode) == NULL ||
+            cJSON_AddNumberToObject(out_payload, "ota_state", (double)status.ota_state) == NULL ||
+            cJSON_AddStringToObject(out_payload, "current_version", status.current_version) == NULL ||
+            cJSON_AddNumberToObject(out_payload, "last_result", (double)status.last_result) == NULL ||
+            cJSON_AddNumberToObject(out_payload, "last_error_code", (double)status.last_error_code) == NULL ||
+            add_number_if_valid(out_payload, "download_progress_pct", (double)status.download_progress_pct, 1U) != 0 ||
+            add_number_if_valid(out_payload, "write_progress_pct", (double)status.write_progress_pct, 1U) != 0 ||
+            (status.target_version[0] != '\0' &&
+             add_string_if_nonempty(out_payload, "target_version", status.target_version) != 0) ||
+            (status.package_sha256_hex[0] != '\0' &&
+             add_string_if_nonempty(out_payload, "package_sha256_hex", status.package_sha256_hex) != 0) ||
+            (status.last_error_message[0] != '\0' &&
+             add_string_if_nonempty(out_payload, "last_error_message", status.last_error_message) != 0)) {
+            cJSON_Delete(root);
+            cJSON_Delete(out_payload);
+            return build_query_nack(reply, reply_cap, corr, session_ref, scope, qcode, "DEVICE_BUSY", "build upgrade status failed");
+        }
+        rc = build_query_result(reply, reply_cap, corr, session_ref, out_payload);
+        cJSON_Delete(root);
+        cJSON_Delete(out_payload);
+        return rc >= 0 ? rc : build_query_nack(reply, reply_cap, corr, session_ref, scope, qcode, "DEVICE_BUSY", "send upgrade status failed");
+    }
+
+    if (scope_is_common(scope) && query_code_matches(qcode, "qgc", NULL)) {
+        cJSON *out_payload = cJSON_CreateObject();
+        ota_upgrade_capability_t cap;
+
+        if (proto_ota_query_upgrade_capability(&cap) != 0 ||
+            out_payload == NULL ||
+            cJSON_AddStringToObject(out_payload, "sc", scope) == NULL ||
+            cJSON_AddStringToObject(out_payload, "qc", qcode) == NULL ||
+            add_bool_number(out_payload, "ota_supported", cap.ota_supported) != 0 ||
+            add_bool_number(out_payload, "dual_bank", cap.dual_bank) != 0 ||
+            cJSON_AddNumberToObject(out_payload, "min_battery_soc_default", (double)cap.min_battery_soc_default) == NULL ||
+            cJSON_AddNumberToObject(out_payload, "min_signal_csq_default", (double)cap.min_signal_csq_default) == NULL ||
+            (cap.package_formats[0] != '\0' &&
+             add_string_if_nonempty(out_payload, "package_formats", cap.package_formats) != 0) ||
+            (cap.compression_formats[0] != '\0' &&
+             add_string_if_nonempty(out_payload, "compression_formats", cap.compression_formats) != 0)) {
+            cJSON_Delete(root);
+            cJSON_Delete(out_payload);
+            return build_query_nack(reply, reply_cap, corr, session_ref, scope, qcode, "DEVICE_BUSY", "build upgrade capability failed");
+        }
+        rc = build_query_result(reply, reply_cap, corr, session_ref, out_payload);
+        cJSON_Delete(root);
+        cJSON_Delete(out_payload);
+        return rc >= 0 ? rc : build_query_nack(reply, reply_cap, corr, session_ref, scope, qcode, "DEVICE_BUSY", "send upgrade capability failed");
     }
 
     cJSON_Delete(root);

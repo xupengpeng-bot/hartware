@@ -457,7 +457,7 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
     }
 
     if ((strcmp(scope, "cm") == 0 || strcmp(scope, "common") == 0) &&
-        (strcmp(action, "upg") == 0 || strcmp(action, "upgrade_firmware") == 0)) {
+        strcmp(action, "upg") == 0) {
         ota_prepare_payload_t prepare;
         ota_upgrade_status_t status;
         const ota_upgrade_capability_t *cap = proto_ota_get_capability();

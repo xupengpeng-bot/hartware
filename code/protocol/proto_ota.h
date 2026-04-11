@@ -29,10 +29,10 @@ void proto_ota_poll(void);
 
 const ota_upgrade_capability_t *proto_ota_get_capability(void);
 
-/** QUERY scope=common query_code=query_upgrade_status */
+/** QUERY scope=common query_code=qgs */
 int proto_ota_query_upgrade_status(ota_upgrade_status_t *out);
 
-/** QUERY scope=common query_code=query_upgrade_capability */
+/** QUERY scope=common query_code=qgc */
 int proto_ota_query_upgrade_capability(ota_upgrade_capability_t *out);
 
 /**
