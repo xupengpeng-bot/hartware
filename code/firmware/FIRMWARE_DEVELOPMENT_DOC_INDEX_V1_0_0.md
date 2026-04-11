@@ -90,6 +90,26 @@ Use this when:
 - firmware needs the released short-code contract for `meter_epoch`
 - billing alignment depends on reboot, counter clear, meter replacement, or abnormal recovery facts
 
+### 9. Current real-device improvement instruction
+
+- [EMBEDDED_AI_IMPROVEMENT_INSTRUCTION_20260412.md](/D:/20251211/智能体/hardware/new/code/firmware/EMBEDDED_AI_IMPROVEMENT_INSTRUCTION_20260412.md)
+
+Use this when:
+
+- firmware is working through the current real-device failure list
+- field validation needs a shared scenario checklist
+- regression work must stay aligned to the `2026-04-12` test round
+
+### 10. Remote upgrade coordination contract
+
+- [REMOTE_UPGRADE_PLATFORM_AND_EMBEDDED_COORDINATION_20260412.md](/D:/20251211/智能体/hardware/new/code/firmware/REMOTE_UPGRADE_PLATFORM_AND_EMBEDDED_COORDINATION_20260412.md)
+
+Use this when:
+
+- platform and embedded are aligning the `upg` short-code workflow
+- OTA acceptance, progress, and final result responsibilities must be split clearly
+- firmware work is about upgrade idempotency, reporting stages, or package verification boundaries
+
 ## Recommended sharing rule
 
 Send these documents by audience:

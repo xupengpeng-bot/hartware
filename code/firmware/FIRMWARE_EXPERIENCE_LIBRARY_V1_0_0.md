@@ -410,6 +410,62 @@ Chat alone is not enough evidence.
 - `supersedes`: `none`
 - `superseded_by`: `none`
 
+### EXP-0018
+
+- `id`: `EXP-0018`
+- `title`: `Replies under stress need both top-level correlation and payload self-description`
+- `status`: `active`
+- `date`: `2026-04-12`
+- `scope`: `query and action reply correlation`
+- `problem`: field stress tests showed commands remaining in `sent` even when the device had already emitted `QS`, `AK`, or `NK`; top-level `c` alone was not sufficient for stable platform-side resolution when reply payloads were too implicit or when `r` was omitted on success paths
+- `wrong_assumption`: as long as the top-level reply carries `c`, the platform will always resolve the command correctly, even if payloads do not echo `sc/qc/ac/tr/wf` and successful paths omit the active session reference
+- `evidence`:
+  - [EMBEDDED_AI_IMPROVEMENT_INSTRUCTION_20260412.md](/D:/20251211/智能体/hardware/new/code/firmware/EMBEDDED_AI_IMPROVEMENT_INSTRUCTION_20260412.md)
+  - [proto_query.c](/D:/20251211/智能体/hardware/new/code/firmware/protocol/proto_query.c)
+  - [proto_execute_action.c](/D:/20251211/智能体/hardware/new/code/firmware/protocol/proto_execute_action.c)
+- `current_rule`: `QS`, `AK`, and `NK` must all carry enough information to be self-explanatory under burst traffic: keep top-level `c`, echo `r` whenever an active session exists, and include payload-side `sc/qc/ac/tr/wf` so platform correlation does not depend on a single field or on hidden local state
+- `implementation_note`: query replies should echo `sc` and `qc`, action replies should echo `sc`, `ac`, and stable target info, and successful replies should resolve `r` from the active runtime session if the request omitted it
+- `verification`: under the `2026-04-12` test round, `qcs/qwf/qem/spu/tpu/pas/res` reply frames now include explicit self-description in addition to the top-level correlation token, reducing the chance that platform leaves them in `sent`
+- `supersedes`: `none`
+- `superseded_by`: `none`
+
+### EXP-0019
+
+- `id`: `EXP-0019`
+- `title`: `Same-card second swipe should stop only after a real start has bound that card to the active session`
+- `status`: `active`
+- `date`: `2026-04-12`
+- `scope`: `card workflow and stop safety`
+- `problem`: treating every authorized swipe as an immediately active session token can cause false stop attempts when the platform has not yet actually started irrigation; if no binding survives the real start, the device also cannot honor the product rule that the same card should end the current irrigation
+- `wrong_assumption`: the card-auth grant itself is enough to bind an active irrigation card, or the card workflow can ignore token binding and still support same-card stop reliably
+- `evidence`:
+  - [workflow_card_reader.c](/D:/20251211/智能体/hardware/new/code/firmware/workflow/workflow_card_reader.c)
+  - [workflow_local_access.c](/D:/20251211/智能体/hardware/new/code/firmware/workflow/workflow_local_access.c)
+  - [safety_flow.c](/D:/20251211/智能体/hardware/new/code/firmware/safety/safety_flow.c)
+- `current_rule`: bind the active swipe token only after a real start succeeds, clear it after a real stop succeeds, and use that binding to interpret a same-card second swipe as a stop request
+- `implementation_note`: keep swipe audit and platform auth as separate streams, preserve the product rule by reusing a lightweight active-token binding, and route second-swipe stop through the real `stop_pump` safety path instead of a fake local state-only stop
+- `verification`: once a card-auth-approved irrigation session has truly started, the same card can trigger a stop through the real stop chain; before an actual start exists, the same card does not falsely stop a non-existent running session
+- `supersedes`: `none`
+- `superseded_by`: `none`
+
+## EXP-0020
+
+- `date`: `2026-04-12`
+- `title`: `Remote upgrade must ACK only after the device has really accepted the upgrade workflow`
+- `status`: `active`
+- `problem`: remote upgrade commands are easy to implement like ordinary control commands, but OTA differs in one important way: `AK` means the device accepted the upgrade workflow, while final success is reported later by stage events
+- `wrong_assumption`: returning `AK` as soon as `upg` is parsed is enough, or download/install success can be implied from the same `AK`
+- `evidence`:
+  - [proto_execute_action.c](/D:/20251211/智能体/hardware/new/code/firmware/protocol/proto_execute_action.c)
+  - [proto_event_report.c](/D:/20251211/智能体/hardware/new/code/firmware/protocol/proto_event_report.c)
+  - [proto_ota.c](/D:/20251211/智能体/hardware/new/code/protocol/proto_ota.c)
+  - [app_main.c](/D:/20251211/智能体/hardware/new/code/firmware/app/app_main.c)
+- `current_rule`: `upg` must first pass local acceptance checks and successfully enter the OTA workflow before returning `AK`; after that, progress and final results are reported asynchronously as upgrade fact events, and old upgrade tokens must not be replayed
+- `implementation_note`: keep OTA acceptance and OTA completion separate, reuse the existing `proto_ota` state machine for precheck/download lifecycle, carry `upgrade_token` end-to-end, and report only upgrade facts after reconnect rather than replaying old `upg`
+- `verification`: accepted upgrades emit `command_acked`, active upgrades emit stage reports, duplicate `upgrade_token` returns explicit `NK`, and reconnect behavior only resends upgrade fact reports
+- `supersedes`: `none`
+- `superseded_by`: `none`
+
 ## 8. Superseded Entry Rule
 
 If an old rule is corrected:

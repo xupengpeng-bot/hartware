@@ -53,14 +53,14 @@ if "%~1"=="" (
 
 rem 整片从 0 开始烧录（如仅 bootloader.bin）用 0x08000000；仅烧录 APP（controller_fw.bin）须与分区一致：
 
-rem   set FLASH_ADDR=0x08010000
+rem   set FLASH_ADDR=0x08004000
 
-rem 仅烧 APP(controller_fw) 且已有 bootloader 时请用: set FLASH_ADDR=0x08010000
+rem 仅烧 APP(controller_fw) 且已有 bootloader 时请用: set FLASH_ADDR=0x08004000
 
 if not defined FLASH_ADDR (
     for %%F in ("!BIN_FILE!") do set "BIN_NAME=%%~nxF"
     if /I "!BIN_NAME!"=="controller_fw.bin" (
-        set "FLASH_ADDR=0x08010000"
+        set "FLASH_ADDR=0x08004000"
     ) else (
         set "FLASH_ADDR=0x08000000"
     )

@@ -213,6 +213,11 @@ bool workflow_local_access_has_active_token(void)
     return s_active_token[0] != '\0';
 }
 
+bool workflow_local_access_is_active_token(const char *token)
+{
+    return workflow_local_access_same_token(token, s_active_token) ? true : false;
+}
+
 void workflow_local_access_clear_active_token(void)
 {
     memset(s_active_token, 0, sizeof(s_active_token));

@@ -13,6 +13,8 @@
 #define OTA_URL_MAX              512U
 #define OTA_SHA256_HEX_LEN       65U
 #define OTA_TICKET_MAX           64U
+#define OTA_ID_MAX               64U
+#define OTA_FILE_NAME_MAX        96U
 #define OTA_PACKAGE_FORMAT_MAX 32U
 #define OTA_ERROR_MESSAGE_MAX  128U
 
@@ -61,6 +63,7 @@ typedef enum {
 typedef enum {
     OTA_EVENT_OTA_PRECHECK_PASSED = 1,
     OTA_EVENT_OTA_PRECHECK_FAILED,
+    OTA_EVENT_OTA_COMMAND_ACKED,
     OTA_EVENT_OTA_DOWNLOAD_PROGRESS,
     OTA_EVENT_OTA_DOWNLOAD_COMPLETED,
     OTA_EVENT_OTA_VERIFY_PASSED,
@@ -78,6 +81,12 @@ typedef struct {
     char     package_url[OTA_URL_MAX];
     uint32_t package_size;
     char     package_sha256_hex[OTA_SHA256_HEX_LEN];
+    char     upgrade_job_id[OTA_ID_MAX];
+    char     upgrade_item_id[OTA_ID_MAX];
+    char     release_id[OTA_ID_MAX];
+    char     release_code[OTA_VERSION_STRING_MAX];
+    char     package_artifact_id[OTA_ID_MAX];
+    char     package_file_name[OTA_FILE_NAME_MAX];
     char     package_format[OTA_PACKAGE_FORMAT_MAX];
     uint8_t  min_battery_soc;
     int16_t  min_signal_csq;

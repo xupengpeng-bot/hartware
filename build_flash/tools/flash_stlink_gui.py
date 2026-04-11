@@ -241,22 +241,22 @@ def _flash_bin_addr_sanity_warning(bin_path: str, addr: str) -> bool:
     if bn == "controller_fw.bin" and a == "0x08000000":
         return messagebox.askokcancel(
             "地址可能错误",
-            "controller_fw.bin 链接在 0x08010000，应烧到 0x08010000。\n"
+            "controller_fw.bin 链接在 0x08004000，应烧到 0x08004000。\n"
             "若烧到 0x08000000 会覆盖 Bootloader 区，且向量表与运行地址不一致，极易无法启动。\n\n"
-            "除非使用 controller_fw_standalone.bin，否则请选「0x08010000」后重试。\n\n"
+            "除非使用 controller_fw_standalone.bin，否则请选「0x08004000」后重试。\n\n"
             "仍要强制烧录吗？",
         )
-    if bn == "bootloader.bin" and a == "0x08010000":
+    if bn == "bootloader.bin" and a == "0x08004000":
         return messagebox.askokcancel(
             "地址可能错误",
             "bootloader.bin 必须烧到 0x08000000（片首）。\n"
-            "烧到 0x08010000 将无法从上电向量进入 Bootloader。\n\n仍要强制烧录吗？",
+            "烧到 0x08004000 将覆盖应用槽起始地址，仍不应这样烧 bootloader。\n\n仍要强制烧录吗？",
         )
-    if "controller_fw_standalone.bin" in bn and a == "0x08010000":
+    if "controller_fw_standalone.bin" in bn and a == "0x08004000":
         return messagebox.askokcancel(
             "地址可能错误",
             "controller_fw_standalone.bin 为独立固件，应烧到 0x08000000。\n"
-            "烧到 0x08010000 将无法从上电正确运行。\n\n仍要强制烧录吗？",
+            "烧到 0x08004000 将无法从上电正确运行。\n\n仍要强制烧录吗？",
         )
     return True
 
@@ -322,7 +322,7 @@ class FlashApp(tk.Tk):
         ).pack(anchor=tk.W)
         ttk.Radiobutton(
             row2,
-            text="0x08010000（应用程序区，与当前工程 bootloader 跳转一致）",
+            text="0x08004000（应用程序区，与当前工程 bootloader 跳转一致）",
             variable=self.var_preset,
             value="app",
             command=self._on_preset,
@@ -336,7 +336,7 @@ class FlashApp(tk.Tk):
         ).pack(anchor=tk.W)
         row2c = ttk.Frame(row2)
         row2c.pack(fill=tk.X, pady=(4, 0))
-        self.var_addr = tk.StringVar(value="0x08010000")
+        self.var_addr = tk.StringVar(value="0x08004000")
         ttk.Entry(row2c, textvariable=self.var_addr, width=18).pack(side=tk.LEFT)
 
         row3 = ttk.Frame(frm)
@@ -446,12 +446,12 @@ class FlashApp(tk.Tk):
             "需要 STM32CubeProgrammer 时请设置 USE_STM32_CUBE_CLI=1。\n"
             "「编译」在 build_flash 目录执行 build.cmd；「编译·烧录·串口」会编译、烧录，"
             "若勾选「烧录成功后自动读串口」则在烧录成功后打开当前端口读日志（需 pip install pyserial）。\n"
-            "\n【推荐烧录流程 — 分区 APP（VTOR=0x08010000）】\n"
+            "\n【推荐烧录流程 — 分区 APP（VTOR=0x08004000）】\n"
             "  1) build_all.cmd 或至少编过 bootloader 目标，得到 bootloader.bin。\n"
             "  2) 先烧 bootloader.bin → 地址选 0x08000000。\n"
-            "  3) 再烧 controller_fw.bin → 地址选 0x08010000。\n"
+            "  3) 再烧 controller_fw.bin → 地址选 0x08004000。\n"
             "  或命令行: build_flash\\flash_full.cmd\n"
-            "【仅升级 APP】已有 bootloader 时: 只烧 controller_fw.bin → 0x08010000（勿写到 0x08000000）。\n"
+            "【仅升级 APP】已有 bootloader 时: 只烧 controller_fw.bin → 0x08004000（勿写到 0x08000000）。\n"
             "【无 Bootloader 排障】controller_fw_standalone.bin → 0x08000000（见 CMake 目标 controller_fw_standalone）。\n"
             "【串口日志】波特率 115200（与固件 UART5 一致），接 MCU PC12=TX5、GND；COM 被占用会 PermissionError。\n"
             f"GUI 运行日志保存到: {self._gui_log_path}\n"
@@ -556,7 +556,7 @@ class FlashApp(tk.Tk):
         if p == "boot":
             self.var_addr.set("0x08000000")
         elif p == "app":
-            self.var_addr.set("0x08010000")
+            self.var_addr.set("0x08004000")
         # custom: 不自动改
 
     def _browse_bin(self) -> None:
@@ -815,7 +815,7 @@ class FlashApp(tk.Tk):
             return
         addr = parse_addr(self.var_addr.get())
         if not addr:
-            messagebox.showerror("错误", "起始地址格式无效，应为例如 0x08010000")
+            messagebox.showerror("错误", "起始地址格式无效，应为例如 0x08004000")
             return
         if not _flash_bin_addr_sanity_warning(bin_path, addr):
             return

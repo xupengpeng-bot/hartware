@@ -49,6 +49,7 @@ void workflow_local_access_get_policy(workflow_local_access_policy_t *out);
 void workflow_local_access_get_state(workflow_local_access_state_t *out);
 const char *workflow_local_access_outcome_label(workflow_local_access_outcome_t outcome);
 bool workflow_local_access_has_active_token(void);
+bool workflow_local_access_is_active_token(const char *token);
 void workflow_local_access_clear_active_token(void);
 workflow_local_access_decision_t workflow_local_access_evaluate(const char *token,
                                                                 uint32_t    now_ms,

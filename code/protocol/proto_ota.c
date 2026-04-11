@@ -9,12 +9,14 @@
 #define OTA_ERR_BAD_STATE      (-2)
 #define OTA_ERR_PORT           (-3)
 #define OTA_ERR_ROLLBACK_PHASE2 (-4)
+#define OTA_ERR_DUPLICATE      (-5)
 
 static const ota_port_t          *s_port;
 static proto_ota_event_cb         s_event_cb;
 static void                      *s_event_user;
 static ota_upgrade_capability_t   s_cap;
 static char                       s_current_version[OTA_VERSION_STRING_MAX];
+static char                       s_last_upgrade_ticket[OTA_TICKET_MAX];
 
 static ota_state_t    s_state;
 static ota_last_result_t s_last_result;
@@ -141,6 +143,7 @@ static int precheck(const ota_prepare_payload_t *p)
 {
     workflow_upgrade_deny_reason_t deny;
     if (!workflow_upgrade_guard_allow_upgrade(p->allow_running_upgrade, &deny)) {
+        set_error((int32_t)deny, "workflow busy");
         proto_ota_event_t ev;
         memset(&ev, 0, sizeof(ev));
         ev.code = OTA_EVENT_OTA_PRECHECK_FAILED;
@@ -157,6 +160,7 @@ static int precheck(const ota_prepare_payload_t *p)
     }
     if (s_port && s_port->tcp_session_stable) {
         if (!s_port->tcp_session_stable(s_port->user)) {
+            set_error(-10, "tcp not stable");
             proto_ota_event_t ev;
             memset(&ev, 0, sizeof(ev));
             ev.code = OTA_EVENT_OTA_PRECHECK_FAILED;
@@ -169,6 +173,7 @@ static int precheck(const ota_prepare_payload_t *p)
         uint8_t soc = 0;
         if (s_port->get_battery_soc(&soc, s_port->user) == 0) {
             if (!p->force_upgrade && soc < p->min_battery_soc) {
+                set_error(-11, "battery low");
                 proto_ota_event_t ev;
                 memset(&ev, 0, sizeof(ev));
                 ev.code = OTA_EVENT_OTA_PRECHECK_FAILED;
@@ -183,6 +188,7 @@ static int precheck(const ota_prepare_payload_t *p)
         int16_t csq = 0;
         if (s_port->get_signal_csq(&csq, s_port->user) == 0) {
             if (!p->force_upgrade && csq < p->min_signal_csq) {
+                set_error(-12, "signal low");
                 proto_ota_event_t ev;
                 memset(&ev, 0, sizeof(ev));
                 ev.code = OTA_EVENT_OTA_PRECHECK_FAILED;
@@ -197,6 +203,7 @@ static int precheck(const ota_prepare_payload_t *p)
         uint32_t free_b = 0;
         if (s_port->storage_free_bytes(&free_b, s_port->user) == 0) {
             if (free_b < p->package_size) {
+                set_error(-13, "storage low");
                 proto_ota_event_t ev;
                 memset(&ev, 0, sizeof(ev));
                 ev.code = OTA_EVENT_OTA_PRECHECK_FAILED;
@@ -231,6 +238,7 @@ void proto_ota_init(const ota_port_t *port, const char *current_firmware_version
     s_download_offset = 0U;
     s_dl_progress_reported = 0U;
     s_sha_ctx = NULL;
+    s_last_upgrade_ticket[0] = '\0';
 
     (void)storage_upgrade_init();
 }
@@ -430,7 +438,16 @@ int proto_ota_execute_action(ota_action_code_t action, const ota_prepare_payload
         if (!prepare) {
             return OTA_ERR_DENIED;
         }
+        if (prepare->upgrade_ticket[0] == '\0') {
+            set_error(-30, "missing upgrade token");
+            return OTA_ERR_DENIED;
+        }
+        if (strcmp(s_last_upgrade_ticket, prepare->upgrade_ticket) == 0) {
+            set_error(-31, "duplicate upgrade token");
+            return OTA_ERR_DUPLICATE;
+        }
         if (s_state != OTA_STATE_IDLE) {
+            set_error(-32, "upgrade busy");
             return OTA_ERR_BAD_STATE;
         }
         s_state = OTA_STATE_PRECHECKING;
@@ -438,11 +455,13 @@ int proto_ota_execute_action(ota_action_code_t action, const ota_prepare_payload
         if (precheck(prepare) != 0) {
             s_state = OTA_STATE_PRECHECK_FAILED;
             s_last_result = OTA_LAST_RESULT_FAILED;
+            ota_copy_cstr(s_last_upgrade_ticket, sizeof(s_last_upgrade_ticket), prepare->upgrade_ticket);
             persist_progress();
-            return 0;
+            return OTA_ERR_DENIED;
         }
         if (storage_upgrade_save_manifest(prepare) != 0) {
             s_state = OTA_STATE_PRECHECK_FAILED;
+            set_error(-33, "manifest save failed");
             return OTA_ERR_DENIED;
         }
         {
@@ -451,18 +470,22 @@ int proto_ota_execute_action(ota_action_code_t action, const ota_prepare_payload
             ev.code = OTA_EVENT_OTA_PRECHECK_PASSED;
             emit_event(&ev);
         }
+        ota_copy_cstr(s_last_upgrade_ticket, sizeof(s_last_upgrade_ticket), prepare->upgrade_ticket);
         s_state = OTA_STATE_READY_TO_DOWNLOAD;
         persist_progress();
         return 0;
 
     case OTA_ACTION_START:
         if (s_state != OTA_STATE_READY_TO_DOWNLOAD) {
+            set_error(-34, "not ready to download");
             return OTA_ERR_BAD_STATE;
         }
         if (!s_port->http_download_chunk || !s_port->flash_write_upgrade_region) {
+            set_error(-35, "download port unavailable");
             return OTA_ERR_PORT;
         }
         if (s_port->flash_erase_upgrade_region && s_port->flash_erase_upgrade_region(s_port->user) != 0) {
+            set_error(-36, "flash erase failed");
             return OTA_ERR_PORT;
         }
         s_download_offset = 0U;
@@ -471,6 +494,12 @@ int proto_ota_execute_action(ota_action_code_t action, const ota_prepare_payload
             (void)s_port->sha256_init(&s_sha_ctx, s_port->user);
         }
         s_state = OTA_STATE_DOWNLOADING;
+        {
+            proto_ota_event_t ev;
+            memset(&ev, 0, sizeof(ev));
+            ev.code = OTA_EVENT_OTA_COMMAND_ACKED;
+            emit_event(&ev);
+        }
         persist_progress();
         return 0;
 
@@ -479,6 +508,7 @@ int proto_ota_execute_action(ota_action_code_t action, const ota_prepare_payload
             return 0;
         }
         if (s_state == OTA_STATE_SWITCHING || s_state == OTA_STATE_UPGRADED) {
+            set_error(-37, "cannot cancel now");
             return OTA_ERR_BAD_STATE;
         }
         if (s_sha_ctx && s_port->sha256_free) {
@@ -493,9 +523,11 @@ int proto_ota_execute_action(ota_action_code_t action, const ota_prepare_payload
 
     case OTA_ACTION_COMMIT:
         if (s_state != OTA_STATE_READY_TO_SWITCH) {
+            set_error(-38, "not ready to switch");
             return OTA_ERR_BAD_STATE;
         }
         if (!s_port->reboot_to_new_image) {
+            set_error(-39, "reboot port unavailable");
             return OTA_ERR_PORT;
         }
         s_state = OTA_STATE_SWITCHING;

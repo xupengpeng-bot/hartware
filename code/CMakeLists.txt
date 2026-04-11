@@ -16,8 +16,26 @@ endif()
 # 可选：放置自定义 fw_build_config.h 的目录（优先于 firmware/config/ 下的默认文件）
 set(FW_PLATFORM_CONFIG_DIR "" CACHE PATH "Override directory for fw_build_config.h (platform host/port/api path)")
 
+add_library(stm32f1_flash STATIC
+    platform/stm32f1_flash.c
+)
+
+target_include_directories(stm32f1_flash PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER MATCHES "arm-none-eabi")
+    target_compile_options(stm32f1_flash PRIVATE
+        -Os
+        -fomit-frame-pointer
+        -fno-unwind-tables
+        -fno-asynchronous-unwind-tables
+    )
+endif()
+
 add_library(controller_ota STATIC
     protocol/proto_ota.c
+    storage/boot_control.c
     storage/storage_upgrade.c
     workflow/workflow_upgrade_guard.c
 )
@@ -28,6 +46,8 @@ target_include_directories(controller_ota PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/storage
     ${CMAKE_CURRENT_SOURCE_DIR}/workflow
 )
+
+target_link_libraries(controller_ota PRIVATE stm32f1_flash)
 
 add_library(controller_firmware STATIC
     third_party/cjson/cJSON.c
@@ -113,6 +133,7 @@ target_include_directories(controller_firmware PRIVATE
 )
 
 target_link_libraries(controller_firmware PUBLIC controller_ota)
+target_link_libraries(controller_firmware PRIVATE stm32f1_flash)
 
 if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER MATCHES "arm-none-eabi")
     target_compile_definitions(controller_firmware PRIVATE BOARD_STM32F103=1)

@@ -12,6 +12,7 @@
 #include "proto_event_report.h"
 #include "runtime_state.h"
 #include "storage_runtime.h"
+#include "workflow_local_access.h"
 #include "workflow_voice.h"
 
 #include "bsp_rtc.h"
@@ -83,6 +84,7 @@ static safety_flow_ctx_t s_flow_ctx;
 static card_auth_report_t s_card_report;
 static pending_event_report_t s_pending_event_report;
 static counter_reset_persist_t s_counter_reset_report;
+static char s_last_authorized_card_no[32];
 
 static void safety_logf(const char *tag, const char *fmt, ...);
 static void safety_copy_string(char *dst, size_t cap, const char *src);
@@ -105,6 +107,7 @@ static void safety_queue_counter_reset_report(device_runtime_t *runtime,
 static void safety_try_emit_counter_reset_report(void);
 static void safety_bootstrap_meter_epoch(void);
 static void safety_track_meter_epoch_events(void);
+static void safety_clear_last_authorized_card(void);
 
 static const safety_action_meta_t s_action_voice = {
     "audio_bus", 1500U, "voice_broadcast", 1U
@@ -126,6 +129,11 @@ static void safety_queue_card_auth_report(const char *result_code, const char *d
     safety_copy_symbol(s_card_report.detail, sizeof(s_card_report.detail), detail);
     safety_copy_symbol(s_card_report.card_no, sizeof(s_card_report.card_no), s_card_ctx.card_no);
     safety_copy_string(s_card_report.session_ref, sizeof(s_card_report.session_ref), s_card_ctx.pending_session_ref);
+}
+
+static void safety_clear_last_authorized_card(void)
+{
+    memset(s_last_authorized_card_no, 0, sizeof(s_last_authorized_card_no));
 }
 
 static void safety_try_emit_card_auth_report(void)
@@ -1303,6 +1311,10 @@ static int safety_start_session_internal(const char *session_ref,
         lease_sec = SAFETY_DEFAULT_LEASE_SEC;
     }
     safety_set_lease(resolved_session_ref, lease_sec, keepalive_required);
+    if (s_last_authorized_card_no[0] != '\0') {
+        workflow_local_access_note_start_accepted(s_last_authorized_card_no, s_flow_ctx.last_tick_ms);
+        safety_clear_last_authorized_card();
+    }
     safety_voice_prompt(VOICE_START_SUCCESS);
     safety_send_state_snapshot_now("session_started");
     safety_update_summary(false);
@@ -1455,6 +1467,8 @@ static int safety_stop_session_internal(session_stop_reason_t reason, bool abnor
                                                                                : "session_stop");
     runtime_state_inc_counter_session_stop();
     safety_clear_lease();
+    workflow_local_access_note_stop_accepted(s_flow_ctx.last_tick_ms);
+    safety_clear_last_authorized_card();
 
     if (recovery_locked) {
         safety_set_main_state(SESSION_STATE_RECOVERY_LOCKED);
@@ -1602,6 +1616,7 @@ void safety_flow_init(void)
     memset(&s_card_report, 0, sizeof(s_card_report));
     memset(&s_pending_event_report, 0, sizeof(s_pending_event_report));
     memset(&s_counter_reset_report, 0, sizeof(s_counter_reset_report));
+    memset(s_last_authorized_card_no, 0, sizeof(s_last_authorized_card_no));
 
     runtime_state_set_blocked_reason(BLOCKED_NONE);
     runtime_state_set_last_event(EVT_BOOT_OK);
@@ -1857,6 +1872,7 @@ void safety_flow_on_query_result(const char *json)
         strcmp(result, "success") == 0) {
         runtime_state_set_last_event(EVT_CLOUD_AUTH_GRANTED);
         safety_voice_prompt(VOICE_AUTH_GRANTED);
+        safety_copy_symbol(s_last_authorized_card_no, sizeof(s_last_authorized_card_no), s_card_ctx.card_no);
         safety_logf("[FLOW] ", "card swipe accepted token=%s session=%s waiting_start_session=1",
                     s_card_ctx.card_no,
                     s_card_ctx.pending_session_ref);
@@ -1869,6 +1885,7 @@ void safety_flow_on_query_result(const char *json)
                     s_card_ctx.pending_session_ref);
         safety_queue_card_auth_report("platform_denied",
                                       reject_reason[0] != '\0' ? reject_reason : "platform_denied");
+        safety_clear_last_authorized_card();
         safety_set_card_state(CARD_STATE_AUTH_DENIED);
     }
 }

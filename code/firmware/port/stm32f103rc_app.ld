@@ -1,17 +1,17 @@
-/* APP @ 0x08010000：与 bootloader 预留 64KB（0x10000）一致；STM32F103RC 共 256KB Flash */
+/* APP @ 0x08004000: 16KB reserved for bootloader + OTA metadata/control pages. */
 ENTRY(Reset_Handler)
 
 _estack = ORIGIN(RAM) + LENGTH(RAM);
 _Min_Heap_Size = 0x0;
 /*
- * 大缓冲已改为 .bss 静态区；栈仅保留调用深度即可。
- * RCT6 共 48KB RAM；与 standalone 一致，避免 .bss 与栈保留之和溢出。
+ * Large buffers stay in .bss; keep only the actual call-depth stack reserve here.
+ * STM32F103RC provides 48KB RAM, matching the standalone build assumptions.
  */
 _Min_Stack_Size = 0xF00;
 
 MEMORY
 {
-    FLASH (rx)  : ORIGIN = 0x08010000, LENGTH = 192K
+    FLASH (rx)  : ORIGIN = 0x08004000, LENGTH = 120K
     RAM   (xrw) : ORIGIN = 0x20000000, LENGTH = 48K
 }
 

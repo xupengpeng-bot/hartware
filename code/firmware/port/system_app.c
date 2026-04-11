@@ -1,11 +1,11 @@
 /*
- * VTOR 必须与链接脚本中 .isr_vector 起始地址一致。
- * - 默认 0x08010000：前有 bootloader@0x08000000；
- * - 独立固件编译时定义 APP_FLASH_VECTOR_ADDR=0x08000000U。
+ * VTOR must match the linked application vector address.
+ * - Default 0x08004000: bootloader + OTA metadata/control occupy the first 16KB.
+ * - Standalone firmware can override with APP_FLASH_VECTOR_ADDR=0x08000000U.
  */
 #define SCB_VTOR_ADDR 0xE000ED08U
 #ifndef APP_FLASH_VECTOR_ADDR
-#define APP_FLASH_VECTOR_ADDR 0x08010000U
+#define APP_FLASH_VECTOR_ADDR 0x08004000U
 #endif
 
 #if defined(BOARD_STM32F103)
@@ -23,9 +23,9 @@ void SystemInit(void)
 {
     *(volatile uint32_t *)SCB_VTOR_ADDR = APP_FLASH_VECTOR_ADDR;
 #if defined(BOARD_STM32F103)
-    /* 时钟：LAO_CAO=HSI 8MHz；否则 HSE+PLL 72MHz。PB4 需 AFIO 关 JTAG */
+    /* Clock source: legacy board can stay on HSI, otherwise HSE+PLL 72MHz. */
     board_clock_init();
-    /* 尽早关闭 JTAG、保留 SWD，PB4 才能作 NET_PWRKEY GPIO（否则为 NJTRST） */
+    /* Disable JTAG but keep SWD so PB4 can be reused as NET_PWRKEY. */
     RCC_APB2ENR_STM |= (1U << 0); /* AFIOEN */
     {
         uint32_t v = AFIO_MAPR_STM;

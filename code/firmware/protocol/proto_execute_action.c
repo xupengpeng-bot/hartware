@@ -1,6 +1,7 @@
 #include "proto_execute_action.h"
 
 #include "config_store.h"
+#include "proto_ota.h"
 #include "proto_codec_json.h"
 #include "proto_command.h"
 #include "runtime_state.h"
@@ -100,20 +101,48 @@ static void read_optional_string_alias(const cJSON *obj, const char *primary_key
     }
 }
 
+static const char *resolve_reply_session_ref(const char *explicit_session_ref, const char *detail_json)
+{
+    static char detail_session_ref[CTRL_SESSION_REF_LEN];
+    const runtime_state_t *rs;
+
+    if (explicit_session_ref != NULL && explicit_session_ref[0] != '\0') {
+        return explicit_session_ref;
+    }
+    detail_session_ref[0] = '\0';
+    if (detail_json != NULL && detail_json[0] != '\0' &&
+        proto_json_get_string(detail_json, "session_ref", detail_session_ref, sizeof(detail_session_ref)) == 0 &&
+        detail_session_ref[0] != '\0') {
+        return detail_session_ref;
+    }
+    rs = runtime_state_get();
+    if (rs != NULL && rs->session_ref[0] != '\0') {
+        return rs->session_ref;
+    }
+    return NULL;
+}
+
 static int build_action_ack(char *reply, size_t reply_cap, const char *corr, const char *session_ref,
-                            const char *action_code, const char *target_channel_code,
+                            const char *scope, const char *action_code, const char *target_channel_code,
                             const char *extra_fields_json)
 {
     const runtime_state_t *rs = runtime_state_get();
-    char local_extra[224];
+    char target_fragment[64];
+    char local_extra[320];
     int wrote;
 
+    target_fragment[0] = '\0';
+    if (target_channel_code != NULL && target_channel_code[0] != '\0') {
+        (void)snprintf(target_fragment, sizeof(target_fragment), ",\"tr\":\"%s\"", target_channel_code);
+    }
     wrote = snprintf(local_extra, sizeof(local_extra),
-                     "\"ac\":\"%s\",\"wf\":\"%s\"%s%s",
+                     "\"sc\":\"%s\",\"ac\":\"%s\",\"wf\":\"%s\"%s%s%s",
+                     scope != NULL ? scope : "",
                      action_code != NULL ? action_code : "",
                      proto_map_workflow_short_from_runtime(
                          runtime_state_workflow_name(rs != NULL ? rs->workflow_state : RUNTIME_WORKFLOW_NOT_READY),
                          (rs != NULL && rs->ready) ? 1U : 0U),
+                     target_fragment,
                      extra_fields_json != NULL && extra_fields_json[0] != '\0' ? "," : "",
                      extra_fields_json != NULL && extra_fields_json[0] != '\0' ? extra_fields_json : "");
     if (wrote < 0 || (size_t)wrote >= sizeof(local_extra)) {
@@ -121,7 +150,7 @@ static int build_action_ack(char *reply, size_t reply_cap, const char *corr, con
     }
     return proto_build_command_ack(reply, reply_cap,
                                    corr != NULL && corr[0] != '\0' ? corr : NULL,
-                                   session_ref != NULL && session_ref[0] != '\0' ? session_ref : NULL,
+                                   resolve_reply_session_ref(session_ref, extra_fields_json),
                                    corr != NULL && corr[0] != '\0' ? corr : "action",
                                    "EXECUTE_ACTION",
                                    target_channel_code != NULL ? target_channel_code : "controller",
@@ -130,18 +159,25 @@ static int build_action_ack(char *reply, size_t reply_cap, const char *corr, con
 }
 
 static int build_action_nack(char *reply, size_t reply_cap, const char *corr, const char *session_ref,
-                             const char *action_code, const char *reject_code, const char *reason)
+                             const char *scope, const char *action_code, const char *target_channel_code,
+                             const char *reject_code, const char *reason)
 {
-    char extra[64];
+    char extra[128];
     int wrote;
 
-    wrote = snprintf(extra, sizeof(extra), "\"ac\":\"%s\"", action_code != NULL ? action_code : "");
+    wrote = snprintf(extra, sizeof(extra),
+                     "\"sc\":\"%s\",\"ac\":\"%s\"%s%s%s",
+                     scope != NULL ? scope : "",
+                     action_code != NULL ? action_code : "",
+                     target_channel_code != NULL && target_channel_code[0] != '\0' ? ",\"tr\":\"" : "",
+                     target_channel_code != NULL && target_channel_code[0] != '\0' ? target_channel_code : "",
+                     target_channel_code != NULL && target_channel_code[0] != '\0' ? "\"" : "");
     if (wrote < 0 || (size_t)wrote >= sizeof(extra)) {
         return -1;
     }
     return proto_build_command_nack(reply, reply_cap,
                                     corr != NULL && corr[0] != '\0' ? corr : NULL,
-                                    session_ref != NULL && session_ref[0] != '\0' ? session_ref : NULL,
+                                    resolve_reply_session_ref(session_ref, NULL),
                                     corr != NULL && corr[0] != '\0' ? corr : "action",
                                     "EXECUTE_ACTION",
                                     reject_code,
@@ -195,6 +231,145 @@ static int require_target(const char *target, const char *expected)
     return target != NULL && expected != NULL && strcmp(target, expected) == 0 ? 0 : -1;
 }
 
+static int require_target_or_empty(const char *target, const char *expected)
+{
+    if (target == NULL || target[0] == '\0') {
+        return 0;
+    }
+    return require_target(target, expected);
+}
+
+static void read_optional_json_string_alias(const cJSON *obj,
+                                            const char *key1,
+                                            const char *key2,
+                                            const char *key3,
+                                            char *out,
+                                            size_t out_cap)
+{
+    read_optional_string(obj, key1, out, out_cap);
+    if (out[0] == '\0' && key2 != NULL) {
+        read_optional_string(obj, key2, out, out_cap);
+    }
+    if (out[0] == '\0' && key3 != NULL) {
+        read_optional_string(obj, key3, out, out_cap);
+    }
+}
+
+static int parse_upgrade_prepare_payload(const cJSON *source, ota_prepare_payload_t *out)
+{
+    const ota_upgrade_capability_t *cap;
+    uint32_t size_bytes = 0U;
+
+    if (source == NULL || out == NULL) {
+        return -1;
+    }
+    memset(out, 0, sizeof(*out));
+    cap = proto_ota_get_capability();
+    out->min_battery_soc = cap != NULL ? cap->min_battery_soc_default : 30U;
+    out->min_signal_csq = cap != NULL ? cap->min_signal_csq_default : 8;
+    out->auto_commit = true;
+
+    read_optional_json_string_alias(source, "upgrade_token", "ut", "upgrade_ticket",
+                                    out->upgrade_ticket, sizeof(out->upgrade_ticket));
+    read_optional_json_string_alias(source, "upgrade_job_id", "uj", NULL,
+                                    out->upgrade_job_id, sizeof(out->upgrade_job_id));
+    read_optional_json_string_alias(source, "upgrade_item_id", "ui", NULL,
+                                    out->upgrade_item_id, sizeof(out->upgrade_item_id));
+    read_optional_json_string_alias(source, "release_id", "rid", NULL,
+                                    out->release_id, sizeof(out->release_id));
+    read_optional_json_string_alias(source, "release_code", "rcd", "target_version",
+                                    out->release_code, sizeof(out->release_code));
+    read_optional_json_string_alias(source, "package_artifact_id", "aid", NULL,
+                                    out->package_artifact_id, sizeof(out->package_artifact_id));
+    read_optional_json_string_alias(source, "package_download_url", "url", "package_url",
+                                    out->package_url, sizeof(out->package_url));
+    read_optional_json_string_alias(source, "package_file_name", "fn", NULL,
+                                    out->package_file_name, sizeof(out->package_file_name));
+    read_optional_json_string_alias(source, "package_checksum", "sum", "checksum",
+                                    out->package_sha256_hex, sizeof(out->package_sha256_hex));
+    read_optional_json_string_alias(source, "package_format", "fmt", NULL,
+                                    out->package_format, sizeof(out->package_format));
+    if (out->package_format[0] == '\0') {
+        (void)snprintf(out->package_format, sizeof(out->package_format), "raw-bin");
+    }
+    if (out->release_code[0] != '\0') {
+        (void)snprintf(out->target_version, sizeof(out->target_version), "%s", out->release_code);
+    }
+    {
+        cJSON *size_item = cJSON_GetObjectItemCaseSensitive((cJSON *)source, "package_size_bytes");
+        if (!cJSON_IsNumber(size_item)) {
+            size_item = cJSON_GetObjectItemCaseSensitive((cJSON *)source, "package_size");
+        }
+        if (cJSON_IsNumber(size_item)) {
+            size_bytes = (uint32_t)(size_item->valuedouble > 0 ? size_item->valuedouble : 0);
+        }
+    }
+    out->package_size = size_bytes;
+
+    {
+        cJSON *item = cJSON_GetObjectItemCaseSensitive((cJSON *)source, "force_upgrade");
+        if (cJSON_IsBool(item)) {
+            out->force_upgrade = cJSON_IsTrue(item);
+        }
+        item = cJSON_GetObjectItemCaseSensitive((cJSON *)source, "allow_running_upgrade");
+        if (cJSON_IsBool(item)) {
+            out->allow_running_upgrade = cJSON_IsTrue(item);
+        }
+        item = cJSON_GetObjectItemCaseSensitive((cJSON *)source, "auto_commit");
+        if (cJSON_IsBool(item)) {
+            out->auto_commit = cJSON_IsTrue(item);
+        }
+    }
+
+    if (out->upgrade_ticket[0] == '\0' ||
+        out->upgrade_job_id[0] == '\0' ||
+        out->upgrade_item_id[0] == '\0' ||
+        out->release_id[0] == '\0' ||
+        out->release_code[0] == '\0' ||
+        out->package_artifact_id[0] == '\0' ||
+        out->package_url[0] == '\0' ||
+        out->package_sha256_hex[0] == '\0' ||
+        out->package_size == 0U) {
+        return -1;
+    }
+    return 0;
+}
+
+static const char *map_ota_reject_code(int result)
+{
+    switch (result) {
+    case -1:
+        return "PARAM_INVALID";
+    case -2:
+        return "DEVICE_BUSY";
+    case -3:
+    case -4:
+        return "MODULE_NOT_ENABLED";
+    case -5:
+        return "EXPIRED_COMMAND";
+    default:
+        return "CAPABILITY_NOT_EXPOSED";
+    }
+}
+
+static const char *map_ota_reject_message(int result)
+{
+    switch (result) {
+    case -1:
+        return "upgrade rejected";
+    case -2:
+        return "upgrade already in progress";
+    case -3:
+        return "upgrade port unavailable";
+    case -4:
+        return "rollback unsupported";
+    case -5:
+        return "duplicate upgrade token";
+    default:
+        return "upgrade rejected";
+    }
+}
+
 int proto_execute_action_handle(const char *json, size_t json_len, char *reply, size_t reply_cap)
 {
     cJSON *root = NULL;
@@ -229,7 +404,7 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
             cJSON_Delete(root);
         }
         log_json_parse_failure("EX", json, json_len);
-        return build_action_nack(reply, reply_cap, NULL, NULL, "", "PARAM_INVALID", "invalid json");
+        return build_action_nack(reply, reply_cap, NULL, NULL, "", "", "", "PARAM_INVALID", "invalid json");
     }
     read_optional_string(root, "c", corr, sizeof(corr));
     read_optional_string(root, "r", session_ref, sizeof(session_ref));
@@ -237,7 +412,7 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
     payload = cJSON_GetObjectItemCaseSensitive(root, "p");
     if (!cJSON_IsObject(payload)) {
         cJSON_Delete(root);
-        return build_action_nack(reply, reply_cap, corr, session_ref, "", "PARAM_INVALID", "missing payload");
+        return build_action_nack(reply, reply_cap, corr, session_ref, "", "", "", "PARAM_INVALID", "missing payload");
     }
 
     read_optional_string_alias(payload, "sc", "scope", scope, sizeof(scope));
@@ -249,18 +424,18 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
     }
     if (params != NULL && !cJSON_IsObject(params)) {
         cJSON_Delete(root);
-        return build_action_nack(reply, reply_cap, corr, session_ref, action, "PARAM_INVALID", "pm must be object");
+        return build_action_nack(reply, reply_cap, corr, session_ref, scope, action, target, "PARAM_INVALID", "pm must be object");
     }
     if (scope[0] == '\0' || action[0] == '\0') {
         cJSON_Delete(root);
-        return build_action_nack(reply, reply_cap, corr, session_ref, action, "PARAM_INVALID", "missing sc or ac");
+        return build_action_nack(reply, reply_cap, corr, session_ref, scope, action, target, "PARAM_INVALID", "missing sc or ac");
     }
     cfg = config_store_active();
     if (params != NULL) {
         params_json = cJSON_PrintUnformatted(params);
     }
 
-    if (strcmp(scope, "cm") == 0 && strcmp(action, "ppu") == 0) {
+    if ((strcmp(scope, "cm") == 0 || strcmp(scope, "common") == 0) && strcmp(action, "ppu") == 0) {
         char prompt_code[40];
         char prompt_json[96];
 
@@ -276,35 +451,102 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
         cJSON_Delete(root);
         if (result != 0) {
             return build_action_nack(reply, reply_cap, corr, session_ref,
-                                     action, map_safety_reject_code(result), safety_flow_error_message(result));
+                                     scope, action, "controller", map_safety_reject_code(result), safety_flow_error_message(result));
         }
-        return build_action_ack(reply, reply_cap, corr, session_ref, action, "controller", NULL);
+        return build_action_ack(reply, reply_cap, corr, session_ref, scope, action, "controller", extra);
     }
 
-    if (strcmp(scope, "wf") == 0 && strcmp(action, "pas") == 0) {
+    if ((strcmp(scope, "cm") == 0 || strcmp(scope, "common") == 0) &&
+        (strcmp(action, "upg") == 0 || strcmp(action, "upgrade_firmware") == 0)) {
+        ota_prepare_payload_t prepare;
+        ota_upgrade_status_t status;
+        const ota_upgrade_capability_t *cap = proto_ota_get_capability();
+        const cJSON *upgrade_payload = params != NULL ? params : payload;
+
+        if (cap == NULL || !cap->ota_supported) {
+            if (params_json != NULL) {
+                cJSON_free(params_json);
+            }
+            cJSON_Delete(root);
+            return build_action_nack(reply, reply_cap, corr, session_ref,
+                                     scope, action, "controller", "MODULE_NOT_ENABLED",
+                                     "ota transport not ready");
+        }
+
+        if (parse_upgrade_prepare_payload(upgrade_payload, &prepare) != 0) {
+            if (params_json != NULL) {
+                cJSON_free(params_json);
+            }
+            cJSON_Delete(root);
+            return build_action_nack(reply, reply_cap, corr, session_ref,
+                                     scope, action, "controller", "PARAM_INVALID",
+                                     "missing upgrade package fields");
+        }
+
+        result = proto_ota_execute_action(OTA_ACTION_PREPARE, &prepare);
+        if (result == 0) {
+            memset(&status, 0, sizeof(status));
+            if (proto_ota_query_upgrade_status(&status) != 0 || status.ota_state != OTA_STATE_READY_TO_DOWNLOAD) {
+                result = -1;
+            }
+        }
+        if (result == 0) {
+            result = proto_ota_execute_action(OTA_ACTION_START, NULL);
+        }
+        if (params_json != NULL) {
+            cJSON_free(params_json);
+        }
+        cJSON_Delete(root);
+        if (result != 0) {
+            return build_action_nack(reply, reply_cap, corr, session_ref,
+                                     scope, action, "controller",
+                                     map_ota_reject_code(result),
+                                     map_ota_reject_message(result));
+        }
+        (void)snprintf(extra, sizeof(extra),
+                       "\"ut\":\"%s\",\"stg\":\"command_acked\"",
+                       prepare.upgrade_ticket);
+        return build_action_ack(reply, reply_cap, corr, session_ref, scope, action, "controller", extra);
+    }
+
+    if ((strcmp(scope, "wf") == 0 || strcmp(scope, "md") == 0) && strcmp(action, "pas") == 0) {
+        if (strcmp(scope, "md") == 0 && require_target_or_empty(target, "pump_1") != 0) {
+            if (params_json != NULL) {
+                cJSON_free(params_json);
+            }
+            cJSON_Delete(root);
+            return build_action_nack(reply, reply_cap, corr, session_ref, scope, action, target, "PARAM_INVALID", "tr must be pump_1");
+        }
         result = workflow_engine_request_pause_session();
         if (params_json != NULL) {
             cJSON_free(params_json);
         }
         cJSON_Delete(root);
         if (result != WORKFLOW_REQ_OK) {
-            return build_action_nack(reply, reply_cap, corr, session_ref, action, "DEVICE_BUSY",
+            return build_action_nack(reply, reply_cap, corr, session_ref, scope, action, "pump_1", "DEVICE_BUSY",
                                      workflow_control_error_message(result));
         }
-        return build_action_ack(reply, reply_cap, corr, session_ref, action, "controller", NULL);
+        return build_action_ack(reply, reply_cap, corr, session_ref, scope, action, "pump_1", NULL);
     }
 
-    if (strcmp(scope, "wf") == 0 && strcmp(action, "res") == 0) {
+    if ((strcmp(scope, "wf") == 0 || strcmp(scope, "md") == 0) && strcmp(action, "res") == 0) {
+        if (strcmp(scope, "md") == 0 && require_target_or_empty(target, "pump_1") != 0) {
+            if (params_json != NULL) {
+                cJSON_free(params_json);
+            }
+            cJSON_Delete(root);
+            return build_action_nack(reply, reply_cap, corr, session_ref, scope, action, target, "PARAM_INVALID", "tr must be pump_1");
+        }
         result = workflow_engine_request_resume_session();
         if (params_json != NULL) {
             cJSON_free(params_json);
         }
         cJSON_Delete(root);
         if (result != WORKFLOW_REQ_OK) {
-            return build_action_nack(reply, reply_cap, corr, session_ref, action, "DEVICE_BUSY",
+            return build_action_nack(reply, reply_cap, corr, session_ref, scope, action, "pump_1", "DEVICE_BUSY",
                                      workflow_control_error_message(result));
         }
-        return build_action_ack(reply, reply_cap, corr, session_ref, action, "controller", NULL);
+        return build_action_ack(reply, reply_cap, corr, session_ref, scope, action, "pump_1", NULL);
     }
 
     if (strcmp(scope, "md") == 0 && strcmp(action, "spu") == 0) {
@@ -313,7 +555,7 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
                 cJSON_free(params_json);
             }
             cJSON_Delete(root);
-            return build_action_nack(reply, reply_cap, corr, session_ref, action, "PARAM_INVALID", "tr must be pump_1");
+            return build_action_nack(reply, reply_cap, corr, session_ref, scope, action, target, "PARAM_INVALID", "tr must be pump_1");
         }
         result = safety_flow_execute_action("start_pump", params_json, extra, sizeof(extra));
         if (params_json != NULL) {
@@ -322,9 +564,9 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
         cJSON_Delete(root);
         if (result != 0) {
             return build_action_nack(reply, reply_cap, corr, session_ref,
-                                     action, map_safety_reject_code(result), safety_flow_error_message(result));
+                                     scope, action, "pump_1", map_safety_reject_code(result), safety_flow_error_message(result));
         }
-        return build_action_ack(reply, reply_cap, corr, session_ref, action, "pump_1", NULL);
+        return build_action_ack(reply, reply_cap, corr, session_ref, scope, action, "pump_1", extra);
     }
 
     if (strcmp(scope, "md") == 0 && strcmp(action, "tpu") == 0) {
@@ -333,7 +575,7 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
                 cJSON_free(params_json);
             }
             cJSON_Delete(root);
-            return build_action_nack(reply, reply_cap, corr, session_ref, action, "PARAM_INVALID", "tr must be pump_1");
+            return build_action_nack(reply, reply_cap, corr, session_ref, scope, action, target, "PARAM_INVALID", "tr must be pump_1");
         }
         result = safety_flow_execute_action("stop_pump", params_json, extra, sizeof(extra));
         if (params_json != NULL) {
@@ -342,9 +584,9 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
         cJSON_Delete(root);
         if (result != 0) {
             return build_action_nack(reply, reply_cap, corr, session_ref,
-                                     action, map_safety_reject_code(result), safety_flow_error_message(result));
+                                     scope, action, "pump_1", map_safety_reject_code(result), safety_flow_error_message(result));
         }
-        return build_action_ack(reply, reply_cap, corr, session_ref, action, "pump_1", NULL);
+        return build_action_ack(reply, reply_cap, corr, session_ref, scope, action, "pump_1", extra);
     }
 
     if (strcmp(scope, "md") == 0 && strcmp(action, "ovl") == 0) {
@@ -353,14 +595,14 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
                 cJSON_free(params_json);
             }
             cJSON_Delete(root);
-            return build_action_nack(reply, reply_cap, corr, session_ref, action, "PARAM_INVALID", "tr must be valve_1");
+            return build_action_nack(reply, reply_cap, corr, session_ref, scope, action, target, "PARAM_INVALID", "tr must be valve_1");
         }
         if (cfg == NULL || cfg->feature_modules.single_valve_control == 0U) {
             if (params_json != NULL) {
                 cJSON_free(params_json);
             }
             cJSON_Delete(root);
-            return build_action_nack(reply, reply_cap, corr, session_ref, action, "MODULE_NOT_ENABLED", "valve module disabled");
+            return build_action_nack(reply, reply_cap, corr, session_ref, scope, action, "valve_1", "MODULE_NOT_ENABLED", "valve module disabled");
         }
         result = safety_flow_execute_action("open_valve", params_json, extra, sizeof(extra));
         if (params_json != NULL) {
@@ -369,9 +611,9 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
         cJSON_Delete(root);
         if (result != 0) {
             return build_action_nack(reply, reply_cap, corr, session_ref,
-                                     action, map_safety_reject_code(result), safety_flow_error_message(result));
+                                     scope, action, "valve_1", map_safety_reject_code(result), safety_flow_error_message(result));
         }
-        return build_action_ack(reply, reply_cap, corr, session_ref, action, "valve_1", NULL);
+        return build_action_ack(reply, reply_cap, corr, session_ref, scope, action, "valve_1", extra);
     }
 
     if (strcmp(scope, "md") == 0 && strcmp(action, "cvl") == 0) {
@@ -380,14 +622,14 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
                 cJSON_free(params_json);
             }
             cJSON_Delete(root);
-            return build_action_nack(reply, reply_cap, corr, session_ref, action, "PARAM_INVALID", "tr must be valve_1");
+            return build_action_nack(reply, reply_cap, corr, session_ref, scope, action, target, "PARAM_INVALID", "tr must be valve_1");
         }
         if (cfg == NULL || cfg->feature_modules.single_valve_control == 0U) {
             if (params_json != NULL) {
                 cJSON_free(params_json);
             }
             cJSON_Delete(root);
-            return build_action_nack(reply, reply_cap, corr, session_ref, action, "MODULE_NOT_ENABLED", "valve module disabled");
+            return build_action_nack(reply, reply_cap, corr, session_ref, scope, action, "valve_1", "MODULE_NOT_ENABLED", "valve module disabled");
         }
         result = safety_flow_execute_action("close_valve", params_json, extra, sizeof(extra));
         if (params_json != NULL) {
@@ -396,14 +638,14 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
         cJSON_Delete(root);
         if (result != 0) {
             return build_action_nack(reply, reply_cap, corr, session_ref,
-                                     action, map_safety_reject_code(result), safety_flow_error_message(result));
+                                     scope, action, "valve_1", map_safety_reject_code(result), safety_flow_error_message(result));
         }
-        return build_action_ack(reply, reply_cap, corr, session_ref, action, "valve_1", NULL);
+        return build_action_ack(reply, reply_cap, corr, session_ref, scope, action, "valve_1", extra);
     }
 
     if (params_json != NULL) {
         cJSON_free(params_json);
     }
     cJSON_Delete(root);
-    return build_action_nack(reply, reply_cap, corr, session_ref, action, "UNSUPPORTED_COMMAND", "unsupported action");
+    return build_action_nack(reply, reply_cap, corr, session_ref, scope, action, target, "UNSUPPORTED_COMMAND", "unsupported action");
 }

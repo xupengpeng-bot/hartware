@@ -301,7 +301,7 @@ if exist "%BUILD_DIR%\Release\controller_fw.exe" echo - Release\controller_fw.ex
 
 echo.
 
-echo 鐑у綍: flash.cmd ^(0x08010000^) / flash_standalone.cmd ^(0x08000000^) / flash_full.cmd ^(bootloader+APP^)
+echo 鐑у綍: flash.cmd ^(0x08004000^) / flash_standalone.cmd ^(0x08000000^) / flash_full.cmd ^(bootloader+APP^)
 
 echo 渚濊禆妫€鏌? deps_check.cmd
 

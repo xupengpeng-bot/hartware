@@ -121,6 +121,20 @@ static int add_string_if_nonempty(cJSON *obj, const char *key, const char *value
     return cJSON_AddStringToObject(obj, key, value) != NULL ? 0 : -1;
 }
 
+static const char *resolve_reply_session_ref(const char *explicit_session_ref)
+{
+    const runtime_state_t *rs;
+
+    if (explicit_session_ref != NULL && explicit_session_ref[0] != '\0') {
+        return explicit_session_ref;
+    }
+    rs = runtime_state_get();
+    if (rs != NULL && rs->session_ref[0] != '\0') {
+        return rs->session_ref;
+    }
+    return NULL;
+}
+
 static const char *breaker_state_value(const runtime_state_t *rs)
 {
     const device_config_t *cfg = config_store_active();
@@ -145,16 +159,31 @@ static const char *meter_protocol_value(void)
 }
 
 static int build_query_nack(char *reply, size_t reply_cap, const char *corr, const char *session_ref,
+                            const char *scope, const char *qcode,
                             const char *reject_code, const char *reason)
 {
+    char extra[128];
+    const runtime_state_t *rs = runtime_state_get();
+    int wrote;
+
+    wrote = snprintf(extra, sizeof(extra),
+                     "\"sc\":\"%s\",\"qc\":\"%s\",\"wf\":\"%s\"",
+                     scope != NULL ? scope : "",
+                     qcode != NULL ? qcode : "",
+                     proto_map_workflow_short_from_runtime(
+                         runtime_state_workflow_name(rs != NULL ? rs->workflow_state : RUNTIME_WORKFLOW_NOT_READY),
+                         (rs != NULL && rs->ready) ? 1U : 0U));
+    if (wrote < 0 || (size_t)wrote >= sizeof(extra)) {
+        return -1;
+    }
     return proto_build_command_nack(reply, reply_cap,
                                     corr != NULL && corr[0] != '\0' ? corr : NULL,
-                                    session_ref != NULL && session_ref[0] != '\0' ? session_ref : NULL,
+                                    resolve_reply_session_ref(session_ref),
                                     corr != NULL && corr[0] != '\0' ? corr : "query",
                                     "QUERY",
                                     reject_code,
                                     reason,
-                                    NULL);
+                                    extra);
 }
 
 int proto_query_handle(const char *json, size_t json_len, char *reply, size_t reply_cap)
@@ -186,7 +215,7 @@ int proto_query_handle(const char *json, size_t json_len, char *reply, size_t re
             cJSON_Delete(root);
         }
         log_json_parse_failure("QR", json, json_len);
-        return build_query_nack(reply, reply_cap, NULL, NULL, "PARAM_INVALID", "invalid json");
+        return build_query_nack(reply, reply_cap, NULL, NULL, "", "", "PARAM_INVALID", "invalid json");
     }
     read_optional_string(root, "c", corr, sizeof(corr));
     read_optional_string(root, "r", session_ref, sizeof(session_ref));
@@ -194,21 +223,21 @@ int proto_query_handle(const char *json, size_t json_len, char *reply, size_t re
     payload = cJSON_GetObjectItemCaseSensitive(root, "p");
     if (!cJSON_IsObject(payload)) {
         cJSON_Delete(root);
-        return build_query_nack(reply, reply_cap, corr, session_ref, "PARAM_INVALID", "bad query payload");
+        return build_query_nack(reply, reply_cap, corr, session_ref, "", "", "PARAM_INVALID", "bad query payload");
     }
 
     read_optional_string_alias(payload, "sc", "scope", scope, sizeof(scope));
     read_optional_string_alias(payload, "qc", "query_code", qcode, sizeof(qcode));
     if (scope[0] == '\0' || qcode[0] == '\0') {
         cJSON_Delete(root);
-        return build_query_nack(reply, reply_cap, corr, session_ref, "PARAM_INVALID", "missing sc or qc");
+        return build_query_nack(reply, reply_cap, corr, session_ref, scope, qcode, "PARAM_INVALID", "missing sc or qc");
     }
 
     rs = runtime_state_get();
     cs = common_status_get();
     if (rs == NULL || cs == NULL) {
         cJSON_Delete(root);
-        return build_query_nack(reply, reply_cap, corr, session_ref, "DEVICE_BUSY", "runtime not ready");
+        return build_query_nack(reply, reply_cap, corr, session_ref, scope, qcode, "DEVICE_BUSY", "runtime not ready");
     }
 
     if (strcmp(scope, "cm") == 0 && strcmp(qcode, "qcs") == 0) {
@@ -219,6 +248,8 @@ int proto_query_handle(const char *json, size_t json_len, char *reply, size_t re
         uint8_t battery_soc_valid = (battery_v_valid != 0U && rs->battery_soc <= 100U) ? 1U : 0U;
 
         if (out_payload == NULL ||
+            cJSON_AddStringToObject(out_payload, "sc", scope) == NULL ||
+            cJSON_AddStringToObject(out_payload, "qc", qcode) == NULL ||
             cJSON_AddNumberToObject(out_payload, "rd", rs->ready ? 1.0 : 0.0) == NULL ||
             cJSON_AddNumberToObject(out_payload, "on", rs->online ? 1.0 : 0.0) == NULL ||
             cJSON_AddNumberToObject(out_payload, "tc", rs->tcp_connected ? 1.0 : 0.0) == NULL ||
@@ -242,64 +273,72 @@ int proto_query_handle(const char *json, size_t json_len, char *reply, size_t re
              add_string_if_nonempty(out_payload, "brs", breaker_state_value(rs)) != 0)) {
             cJSON_Delete(root);
             cJSON_Delete(out_payload);
-            return build_query_nack(reply, reply_cap, corr, session_ref, "DEVICE_BUSY", "build qcs failed");
+            return build_query_nack(reply, reply_cap, corr, session_ref, scope, qcode, "DEVICE_BUSY", "build qcs failed");
         }
         rc = proto_json_build_message(reply, reply_cap, PROTO_MSG_QUERY_RESULT, 0U,
                                       corr[0] != '\0' ? corr : NULL,
-                                      session_ref[0] != '\0' ? session_ref : NULL,
+                                      resolve_reply_session_ref(session_ref),
                                       out_payload);
         cJSON_Delete(root);
-        return rc >= 0 ? rc : build_query_nack(reply, reply_cap, corr, session_ref, "DEVICE_BUSY", "send qcs failed");
+        return rc >= 0 ? rc : build_query_nack(reply, reply_cap, corr, session_ref, scope, qcode, "DEVICE_BUSY", "send qcs failed");
     }
 
     if (strcmp(scope, "wf") == 0 && strcmp(qcode, "qwf") == 0) {
         cJSON *out_payload = cJSON_CreateObject();
 
         if (out_payload == NULL ||
+            cJSON_AddStringToObject(out_payload, "sc", scope) == NULL ||
+            cJSON_AddStringToObject(out_payload, "qc", qcode) == NULL ||
             cJSON_AddStringToObject(out_payload, "wf",
                                     proto_map_workflow_short_from_runtime(runtime_state_workflow_name(rs->workflow_state),
                                                                           rs->ready ? 1U : 0U)) == NULL) {
             cJSON_Delete(root);
             cJSON_Delete(out_payload);
-            return build_query_nack(reply, reply_cap, corr, session_ref, "DEVICE_BUSY", "build qwf failed");
+            return build_query_nack(reply, reply_cap, corr, session_ref, scope, qcode, "DEVICE_BUSY", "build qwf failed");
         }
         rc = proto_json_build_message(reply, reply_cap, PROTO_MSG_QUERY_RESULT, 0U,
                                       corr[0] != '\0' ? corr : NULL,
-                                      session_ref[0] != '\0' ? session_ref : NULL,
+                                      resolve_reply_session_ref(session_ref),
                                       out_payload);
         cJSON_Delete(root);
-        return rc >= 0 ? rc : build_query_nack(reply, reply_cap, corr, session_ref, "DEVICE_BUSY", "send qwf failed");
+        return rc >= 0 ? rc : build_query_nack(reply, reply_cap, corr, session_ref, scope, qcode, "DEVICE_BUSY", "send qwf failed");
     }
 
     if (strcmp(scope, "cm") == 0 && strcmp(qcode, "qem") == 0) {
         cJSON *out_payload = cJSON_CreateObject();
-        uint8_t meter_valid = (rs->meter_last.valid != 0U) ? 1U : 0U;
 
         if (out_payload == NULL ||
-            meter_valid == 0U ||
+            cJSON_AddStringToObject(out_payload, "sc", scope) == NULL ||
+            cJSON_AddStringToObject(out_payload, "qc", qcode) == NULL ||
+            cJSON_AddStringToObject(out_payload, "wf",
+                                    proto_map_workflow_short_from_runtime(runtime_state_workflow_name(rs->workflow_state),
+                                                                          rs->ready ? 1U : 0U)) == NULL ||
             (meter_protocol_value() != NULL &&
              add_string_if_nonempty(out_payload, "mp", meter_protocol_value()) != 0) ||
             cJSON_AddNumberToObject(out_payload, "me", (double)rs->meter_epoch) == NULL ||
+            cJSON_AddNumberToObject(out_payload, "rt", (double)rs->runtime_sec) == NULL ||
             add_number_if_valid(out_payload, "vv", (double)rs->voltage_v,
                                 (uint8_t)(rs->voltage_v >= 0.0f && rs->voltage_v <= 1000.0f)) != 0 ||
             add_number_if_valid(out_payload, "ia", (double)rs->current_a,
                                 (uint8_t)(rs->current_a >= 0.0f && rs->current_a <= 1000.0f)) != 0 ||
             add_number_if_valid(out_payload, "pw", (double)rs->power_kw,
                                 (uint8_t)(rs->power_kw >= 0.0f && rs->power_kw <= 500.0f)) != 0 ||
+            add_number_if_valid(out_payload, "fq", (double)rs->total_m3,
+                                (uint8_t)(rs->total_m3 >= 0.0f && rs->total_m3 <= 10000000.0f)) != 0 ||
             add_number_if_valid(out_payload, "ek", (double)rs->energy_kwh,
                                 (uint8_t)(rs->energy_kwh >= 0.0f && rs->energy_kwh <= 10000000.0f)) != 0) {
             cJSON_Delete(root);
             cJSON_Delete(out_payload);
-            return build_query_nack(reply, reply_cap, corr, session_ref, "DEVICE_BUSY", "build qem failed");
+            return build_query_nack(reply, reply_cap, corr, session_ref, scope, qcode, "DEVICE_BUSY", "build qem failed");
         }
         rc = proto_json_build_message(reply, reply_cap, PROTO_MSG_QUERY_RESULT, 0U,
                                       corr[0] != '\0' ? corr : NULL,
-                                      session_ref[0] != '\0' ? session_ref : NULL,
+                                      resolve_reply_session_ref(session_ref),
                                       out_payload);
         cJSON_Delete(root);
-        return rc >= 0 ? rc : build_query_nack(reply, reply_cap, corr, session_ref, "DEVICE_BUSY", "send qem failed");
+        return rc >= 0 ? rc : build_query_nack(reply, reply_cap, corr, session_ref, scope, qcode, "DEVICE_BUSY", "send qem failed");
     }
 
     cJSON_Delete(root);
-    return build_query_nack(reply, reply_cap, corr, session_ref, "UNSUPPORTED_COMMAND", "unsupported query");
+    return build_query_nack(reply, reply_cap, corr, session_ref, scope, qcode, "UNSUPPORTED_COMMAND", "unsupported query");
 }

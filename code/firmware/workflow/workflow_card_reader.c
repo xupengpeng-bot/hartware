@@ -4,6 +4,7 @@
 #include "proto_event_report.h"
 #include "runtime_state.h"
 #include "safety_flow.h"
+#include "workflow_local_access.h"
 #include "workflow_voice.h"
 
 #include <stdio.h>
@@ -476,6 +477,40 @@ static void workflow_card_reader_emit_rejected(const char *reason, const char *t
     workflow_card_reader_queue_audit("rejected", reason, "uart1_card_reader", token, now_ms);
 }
 
+static int workflow_card_reader_try_same_card_stop(const char *token, const char *source_code, uint32_t now_ms)
+{
+    const runtime_state_t *runtime = runtime_state_get();
+    char detail[192];
+    int rc;
+
+    if (token == NULL || token[0] == '\0' || source_code == NULL || runtime == NULL) {
+        return 0;
+    }
+    if (!workflow_local_access_is_active_token(token)) {
+        return 0;
+    }
+    if (runtime->run_state != RUNTIME_RUN_RUNNING) {
+        return 0;
+    }
+
+    detail[0] = '\0';
+    rc = safety_flow_execute_action("stop_pump", NULL, detail, sizeof(detail));
+    workflow_card_reader_logf("same-card stop token=%s rc=%lu now_ms=%lu\r\n",
+                              token,
+                              (unsigned long)((rc < 0) ? (0UL - (unsigned long)rc) : (unsigned long)rc),
+                              (unsigned long)now_ms);
+    workflow_card_reader_note_handled(token, now_ms);
+
+    if (rc == 0) {
+        workflow_card_reader_set_state("accepted", "same_card_stop", source_code, token, now_ms, now_ms);
+        workflow_card_reader_queue_audit("accepted", "same_card_stop", source_code, token, now_ms);
+    } else {
+        workflow_card_reader_set_state("rejected", "same_card_stop_failed", source_code, token, now_ms, 0U);
+        workflow_card_reader_queue_audit("rejected", "same_card_stop_failed", source_code, token, now_ms);
+    }
+    return 1;
+}
+
 static void workflow_card_reader_handle_token(const char *token, const char *source_code, uint32_t now_ms)
 {
     char reason[WORKFLOW_CARD_READER_REASON_LEN];
@@ -488,6 +523,10 @@ static void workflow_card_reader_handle_token(const char *token, const char *sou
                               token,
                               (unsigned long)guard,
                               (unsigned long)now_ms);
+
+    if (workflow_card_reader_try_same_card_stop(token, source_code, now_ms) != 0) {
+        return;
+    }
 
     if (guard != WORKFLOW_CARD_READER_GUARD_ALLOW) {
         if (strcmp(reason, "global_debounce") == 0 || strcmp(reason, "same_token_debounce") == 0) {

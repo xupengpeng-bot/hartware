@@ -1,4 +1,4 @@
-# STM32F103: bootloader @ 0x08000000, APP vector @ 0x08010000（与 3.0jijingoldplatform 一致）
+# STM32F103: bootloader @ 0x08000000, APP vector @ 0x08004000
 
 if(NOT (CMAKE_C_COMPILER_ID STREQUAL "GNU" AND "${CMAKE_C_COMPILER}" MATCHES "arm-none-eabi"))
     message(STATUS "bootloader: skipped (needs arm-none-eabi-gcc)")
@@ -7,8 +7,14 @@ else()
 
     add_executable(bootloader
         main.c
+        ${CMAKE_SOURCE_DIR}/platform/stm32f1_flash.c
+        ${CMAKE_SOURCE_DIR}/storage/boot_control.c
         system_boot.c
         startup_stm32f103rc_bootloader_gcc.S
+    )
+
+    target_include_directories(bootloader PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
     )
 
     target_compile_options(bootloader PRIVATE
@@ -40,7 +46,6 @@ else()
             COMMAND ${CMAKE_OBJCOPY} -O ihex $<TARGET_FILE:bootloader> $<TARGET_FILE_DIR:bootloader>/bootloader.hex
             COMMAND ${CMAKE_OBJCOPY} -O binary $<TARGET_FILE:bootloader> $<TARGET_FILE_DIR:bootloader>/bootloader.bin
             COMMENT "objcopy bootloader -> hex/bin")
-        # 复制到构建根目录（add_custom_command TARGET 须在定义 bootloader 的同一 CMakeLists 中）
         add_custom_command(TARGET bootloader POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 $<TARGET_FILE_DIR:bootloader>/bootloader.bin
