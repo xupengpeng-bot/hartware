@@ -118,6 +118,61 @@ static void net_socket_log_rx_state(const char *event,
     bsp_debug_log(line);
 }
 
+static int net_socket_starts_with_bytes(const uint8_t *data, size_t len, const char *literal)
+{
+    size_t lit_len;
+
+    if (data == NULL || literal == NULL) {
+        return 0;
+    }
+    lit_len = strlen(literal);
+    if (len < lit_len) {
+        return 0;
+    }
+    return memcmp(data, literal, lit_len) == 0 ? 1 : 0;
+}
+
+static int net_socket_is_wrong_upstream_payload(const net_socket_client_t *c)
+{
+    const uint8_t *p;
+    size_t len;
+
+    if (c == NULL || c->rx_len < PROTO_LENGTH_PREFIX_BYTES) {
+        return 0;
+    }
+    p = c->rx;
+    len = c->rx_len;
+    if (net_socket_starts_with_bytes(p, len, "HTTP/") != 0 ||
+        net_socket_starts_with_bytes(p, len, "GET ") != 0 ||
+        net_socket_starts_with_bytes(p, len, "POST ") != 0 ||
+        net_socket_starts_with_bytes(p, len, "<html") != 0 ||
+        net_socket_starts_with_bytes(p, len, "<!DOCTYPE") != 0) {
+        return 1;
+    }
+    return 0;
+}
+
+static void net_socket_log_wrong_upstream(const net_socket_client_t *c)
+{
+    char line[224];
+    size_t shown;
+
+    if (c == NULL || c->rx_len == 0U) {
+        return;
+    }
+    shown = c->rx_len;
+    if (shown > 64U) {
+        shown = 64U;
+    }
+    (void)snprintf(line, sizeof(line),
+                   "[PROTO] wrong upstream: received HTTP/HTML payload buffered=%lu sample=%.*s%s\r\n",
+                   (unsigned long)c->rx_len,
+                   (int)shown,
+                   (const char *)c->rx,
+                   c->rx_len > shown ? "..." : "");
+    bsp_debug_log(line);
+}
+
 int net_socket_client_feed(net_socket_client_t *c, const uint8_t *chunk, size_t chunk_len,
                            char *out_json, size_t out_cap, size_t *out_json_len)
 {
@@ -160,6 +215,11 @@ int net_socket_client_feed(net_socket_client_t *c, const uint8_t *chunk, size_t 
            (uint32_t)c->rx[3];
     frame = PROTO_LENGTH_PREFIX_BYTES + (size_t)plen;
     if (plen > sizeof(c->rx) || frame > sizeof(c->rx)) {
+        if (net_socket_is_wrong_upstream_payload(c) != 0) {
+            net_socket_log_wrong_upstream(c);
+            net_socket_client_disconnect(c);
+            return NET_SOCKET_CLIENT_POLL_WRONG_UPSTREAM;
+        }
         char line[160];
         (void)snprintf(line, sizeof(line),
                        "[PROTO] RX invalid prefix=%lu buffered=%lu cap=%lu, shift=1 for resync\r\n",
@@ -168,7 +228,7 @@ int net_socket_client_feed(net_socket_client_t *c, const uint8_t *chunk, size_t 
                        (unsigned long)sizeof(c->rx));
         bsp_debug_log(line);
         shift_left(c, 1U);
-        return 0;
+        return NET_SOCKET_CLIENT_POLL_NO_FRAME;
     }
     if (c->rx_len < frame) {
         if (chunk != NULL && chunk_len > 0U) {
@@ -182,7 +242,7 @@ int net_socket_client_feed(net_socket_client_t *c, const uint8_t *chunk, size_t 
                                     body_have,
                                     body_missing);
         }
-        return 0;
+        return NET_SOCKET_CLIENT_POLL_NO_FRAME;
     }
     if (plen + 1U > out_cap) {
         char line[160];
@@ -193,7 +253,7 @@ int net_socket_client_feed(net_socket_client_t *c, const uint8_t *chunk, size_t 
                        (unsigned long)c->rx_len);
         bsp_debug_log(line);
         shift_left(c, frame);
-        return 0;
+        return NET_SOCKET_CLIENT_POLL_NO_FRAME;
     }
     memcpy(out_json, c->rx + PROTO_LENGTH_PREFIX_BYTES, plen);
     out_json[plen] = '\0';
@@ -207,7 +267,7 @@ int net_socket_client_feed(net_socket_client_t *c, const uint8_t *chunk, size_t 
                             plen,
                             (size_t)plen,
                             0U);
-    return 1;
+    return NET_SOCKET_CLIENT_POLL_FRAME_READY;
 }
 
 int net_socket_client_poll(net_socket_client_t *c, uint32_t monotonic_ms, char *out_json, size_t out_cap,
@@ -219,8 +279,11 @@ int net_socket_client_poll(net_socket_client_t *c, uint32_t monotonic_ms, char *
     size_t  n;
     while ((n = net_4g_modem_tcp_rx_pop(chunk, sizeof(chunk))) > 0U) {
         int feed_rc = net_socket_client_feed(c, chunk, n, out_json, out_cap, out_json_len);
-        if (feed_rc == 1) {
-            return 1;
+        if (feed_rc == NET_SOCKET_CLIENT_POLL_FRAME_READY) {
+            return NET_SOCKET_CLIENT_POLL_FRAME_READY;
+        }
+        if (feed_rc == NET_SOCKET_CLIENT_POLL_WRONG_UPSTREAM || c->connected == 0) {
+            return feed_rc;
         }
     }
 #endif

@@ -7,6 +7,10 @@
 #define NET_SOCKET_CLIENT_HOST_MAX 96U
 #define NET_SOCKET_CLIENT_RX_MAX   1536U
 
+#define NET_SOCKET_CLIENT_POLL_NO_FRAME        0
+#define NET_SOCKET_CLIENT_POLL_FRAME_READY     1
+#define NET_SOCKET_CLIENT_POLL_WRONG_UPSTREAM -2
+
 typedef struct {
     uint8_t  rx[NET_SOCKET_CLIENT_RX_MAX];
     size_t   rx_len;
@@ -20,7 +24,7 @@ void net_socket_client_init(net_socket_client_t *c);
 int  net_socket_client_connect(net_socket_client_t *c, const char *host, uint16_t port);
 void net_socket_client_disconnect(net_socket_client_t *c);
 int  net_socket_client_send(net_socket_client_t *c, const uint8_t *data, size_t len);
-/** Push bytes from driver ISR / poll; returns 1 if one full JSON frame was extracted into out_json. */
+/** Push bytes from driver ISR / poll. */
 int  net_socket_client_feed(net_socket_client_t *c, const uint8_t *chunk, size_t chunk_len,
                             char *out_json, size_t out_cap, size_t *out_json_len);
 /** Drain modem RX into feed then try extract one frame (4G builds only). */

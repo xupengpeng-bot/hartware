@@ -575,7 +575,11 @@ void net_connectivity_poll(uint32_t monotonic_ms)
         size_t reply_len = 0U;
         size_t json_len = 0U;
         int feed_rc = net_socket_client_poll(&s_sock, monotonic_ms, s_rx_json, sizeof(s_rx_json), &json_len);
-        if (feed_rc != 1) {
+        if (feed_rc == NET_SOCKET_CLIENT_POLL_WRONG_UPSTREAM) {
+            net_handle_disconnect("wrong_upstream", monotonic_ms, 0U);
+            break;
+        }
+        if (feed_rc != NET_SOCKET_CLIENT_POLL_FRAME_READY) {
             break;
         }
         net_log_json("RX", s_rx_json, json_len);
