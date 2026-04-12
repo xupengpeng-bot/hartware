@@ -370,6 +370,28 @@ static const char *map_ota_reject_message(int result)
     }
 }
 
+static const char *map_ota_idempotent_stage(ota_state_t state)
+{
+    switch (state) {
+    case OTA_STATE_DOWNLOADING:
+        return "downloading";
+    case OTA_STATE_DOWNLOADED:
+        return "downloaded";
+    case OTA_STATE_VERIFYING:
+        return "verifying";
+    case OTA_STATE_VERIFIED:
+        return "verified";
+    case OTA_STATE_WRITING:
+        return "writing";
+    case OTA_STATE_READY_TO_SWITCH:
+        return "ready_to_switch";
+    case OTA_STATE_SWITCHING:
+        return "switching";
+    default:
+        return "accepted";
+    }
+}
+
 int proto_execute_action_handle(const char *json, size_t json_len, char *reply, size_t reply_cap)
 {
     cJSON *root = NULL;
@@ -460,6 +482,7 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
         strcmp(action, "upg") == 0) {
         ota_prepare_payload_t prepare;
         ota_upgrade_status_t status;
+        ota_state_t duplicate_state = OTA_STATE_IDLE;
         const ota_upgrade_capability_t *cap = proto_ota_get_capability();
         const cJSON *upgrade_payload = params != NULL ? params : payload;
 
@@ -484,6 +507,10 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
         }
 
         result = proto_ota_execute_action(OTA_ACTION_PREPARE, &prepare);
+        if (result == -5 &&
+            proto_ota_is_prepare_duplicate_accepted(&prepare, &duplicate_state)) {
+            result = 1;
+        }
         if (result == 0) {
             memset(&status, 0, sizeof(status));
             if (proto_ota_query_upgrade_status(&status) != 0 || status.ota_state != OTA_STATE_READY_TO_DOWNLOAD) {
@@ -497,15 +524,22 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
             cJSON_free(params_json);
         }
         cJSON_Delete(root);
-        if (result != 0) {
+        if (result < 0) {
             return build_action_nack(reply, reply_cap, corr, session_ref,
                                      scope, action, "controller",
                                      map_ota_reject_code(result),
                                      map_ota_reject_message(result));
         }
-        (void)snprintf(extra, sizeof(extra),
-                       "\"ut\":\"%s\",\"stg\":\"command_acked\"",
-                       prepare.upgrade_ticket);
+        if (result > 0) {
+            (void)snprintf(extra, sizeof(extra),
+                           "\"ut\":\"%s\",\"stg\":\"idempotent_replay\",\"ota_state\":\"%s\"",
+                           prepare.upgrade_ticket,
+                           map_ota_idempotent_stage(duplicate_state));
+        } else {
+            (void)snprintf(extra, sizeof(extra),
+                           "\"ut\":\"%s\",\"stg\":\"command_acked\"",
+                           prepare.upgrade_ticket);
+        }
         return build_action_ack(reply, reply_cap, corr, session_ref, scope, action, "controller", extra);
     }
 

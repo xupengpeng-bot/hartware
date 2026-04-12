@@ -1,5 +1,8 @@
 #include "net_socket_client.h"
 #include "proto_envelope.h"
+#include "bsp_uart.h"
+
+#include <stdio.h>
 #include <string.h>
 
 #if defined(BOARD_STM32F103)
@@ -95,9 +98,32 @@ static void shift_left(net_socket_client_t *c, size_t n)
     c->rx_len -= n;
 }
 
+static void net_socket_log_rx_state(const char *event,
+                                    size_t chunk_len,
+                                    size_t buffered_len,
+                                    uint32_t prefix_len,
+                                    size_t body_have,
+                                    size_t body_missing)
+{
+    char line[176];
+
+    (void)snprintf(line, sizeof(line),
+                   "[PROTO] RX %s chunk=%lu buffered=%lu prefix=%lu body_have=%lu body_missing=%lu\r\n",
+                   event != NULL ? event : "state",
+                   (unsigned long)chunk_len,
+                   (unsigned long)buffered_len,
+                   (unsigned long)prefix_len,
+                   (unsigned long)body_have,
+                   (unsigned long)body_missing);
+    bsp_debug_log(line);
+}
+
 int net_socket_client_feed(net_socket_client_t *c, const uint8_t *chunk, size_t chunk_len,
                            char *out_json, size_t out_cap, size_t *out_json_len)
 {
+    uint32_t plen;
+    size_t frame;
+
     if (out_json_len) {
         *out_json_len = 0U;
     }
@@ -106,6 +132,13 @@ int net_socket_client_feed(net_socket_client_t *c, const uint8_t *chunk, size_t 
     }
     if (chunk != NULL && chunk_len > 0U) {
         if (c->rx_len + chunk_len > sizeof(c->rx)) {
+            char line[160];
+            (void)snprintf(line, sizeof(line),
+                           "[PROTO] RX buffer overflow buffered=%lu incoming=%lu cap=%lu, drop buffered data\r\n",
+                           (unsigned long)c->rx_len,
+                           (unsigned long)chunk_len,
+                           (unsigned long)sizeof(c->rx));
+            bsp_debug_log(line);
             c->rx_len = 0U;
             return 0;
         }
@@ -113,19 +146,52 @@ int net_socket_client_feed(net_socket_client_t *c, const uint8_t *chunk, size_t 
         c->rx_len += chunk_len;
     }
     if (c->rx_len < PROTO_LENGTH_PREFIX_BYTES) {
+        if (chunk != NULL && chunk_len > 0U) {
+            net_socket_log_rx_state("wait_prefix",
+                                    chunk_len,
+                                    c->rx_len,
+                                    0U,
+                                    0U,
+                                    PROTO_LENGTH_PREFIX_BYTES - c->rx_len);
+        }
         return 0;
     }
-    uint32_t plen = ((uint32_t)c->rx[0] << 24) | ((uint32_t)c->rx[1] << 16) | ((uint32_t)c->rx[2] << 8) |
-                    (uint32_t)c->rx[3];
-    size_t frame = PROTO_LENGTH_PREFIX_BYTES + (size_t)plen;
+    plen = ((uint32_t)c->rx[0] << 24) | ((uint32_t)c->rx[1] << 16) | ((uint32_t)c->rx[2] << 8) |
+           (uint32_t)c->rx[3];
+    frame = PROTO_LENGTH_PREFIX_BYTES + (size_t)plen;
     if (plen > sizeof(c->rx) || frame > sizeof(c->rx)) {
+        char line[160];
+        (void)snprintf(line, sizeof(line),
+                       "[PROTO] RX invalid prefix=%lu buffered=%lu cap=%lu, shift=1 for resync\r\n",
+                       (unsigned long)plen,
+                       (unsigned long)c->rx_len,
+                       (unsigned long)sizeof(c->rx));
+        bsp_debug_log(line);
         shift_left(c, 1U);
         return 0;
     }
     if (c->rx_len < frame) {
+        if (chunk != NULL && chunk_len > 0U) {
+            size_t body_have = c->rx_len > PROTO_LENGTH_PREFIX_BYTES ?
+                               (c->rx_len - PROTO_LENGTH_PREFIX_BYTES) : 0U;
+            size_t body_missing = (size_t)plen > body_have ? ((size_t)plen - body_have) : 0U;
+            net_socket_log_rx_state("partial_frame",
+                                    chunk_len,
+                                    c->rx_len,
+                                    plen,
+                                    body_have,
+                                    body_missing);
+        }
         return 0;
     }
     if (plen + 1U > out_cap) {
+        char line[160];
+        (void)snprintf(line, sizeof(line),
+                       "[PROTO] RX frame drop prefix=%lu out_cap=%lu buffered=%lu\r\n",
+                       (unsigned long)plen,
+                       (unsigned long)out_cap,
+                       (unsigned long)c->rx_len);
+        bsp_debug_log(line);
         shift_left(c, frame);
         return 0;
     }
@@ -135,6 +201,12 @@ int net_socket_client_feed(net_socket_client_t *c, const uint8_t *chunk, size_t 
         *out_json_len = plen;
     }
     shift_left(c, frame);
+    net_socket_log_rx_state("frame_ready",
+                            chunk_len,
+                            c->rx_len,
+                            plen,
+                            (size_t)plen,
+                            0U);
     return 1;
 }
 

@@ -78,7 +78,7 @@
 #define USART_TX_SPIN_MAX 200000U
 #define UART1_RX_FIFO_CAP 128U
 #define UART2_RX_FIFO_CAP 128U
-#define UART4_RX_FIFO_CAP 32U
+#define UART4_RX_FIFO_CAP 256U
 #define USART1_IRQ_BIT     (1U << (37U - 32U))
 #define USART2_IRQ_BIT     (1U << (38U - 32U))
 #define UART4_IRQ_BIT      (1U << (52U - 32U))
@@ -238,6 +238,11 @@ static volatile uint16_t s_uart2_rx_tail;
 static volatile uint8_t  s_uart4_rx_fifo[UART4_RX_FIFO_CAP];
 static volatile uint16_t s_uart4_rx_head;
 static volatile uint16_t s_uart4_rx_tail;
+static volatile uint32_t s_uart4_rx_fifo_drop_count;
+static volatile uint32_t s_uart4_rx_ore_count;
+static volatile uint32_t s_uart4_rx_fe_count;
+static volatile uint32_t s_uart4_rx_ne_count;
+static volatile uint32_t s_uart4_rx_pe_count;
 
 static void uart1_fifo_reset(void)
 {
@@ -302,6 +307,7 @@ static void uart4_fifo_push(uint8_t c)
     uint16_t next = (uint16_t)((s_uart4_rx_tail + 1U) % UART4_RX_FIFO_CAP);
     if (next == s_uart4_rx_head) {
         s_uart4_rx_head = (uint16_t)((s_uart4_rx_head + 1U) % UART4_RX_FIFO_CAP);
+        s_uart4_rx_fifo_drop_count++;
     }
     s_uart4_rx_fifo[s_uart4_rx_tail] = c;
     s_uart4_rx_tail = next;
@@ -807,11 +813,69 @@ void UART4_IRQHandler(void)
             continue;
         }
         if ((sr & (USART_SR_ORE | USART_SR_FE | USART_SR_NE | USART_SR_PE)) != 0U) {
+            if ((sr & USART_SR_ORE) != 0U) {
+                s_uart4_rx_ore_count++;
+            }
+            if ((sr & USART_SR_FE) != 0U) {
+                s_uart4_rx_fe_count++;
+            }
+            if ((sr & USART_SR_NE) != 0U) {
+                s_uart4_rx_ne_count++;
+            }
+            if ((sr & USART_SR_PE) != 0U) {
+                s_uart4_rx_pe_count++;
+            }
             (void)UART4_DR;
             continue;
         }
         break;
     }
+}
+
+void bsp_uart_modem_take_rx_diag(uint32_t *fifo_drop_count,
+                                 uint32_t *ore_count,
+                                 uint32_t *fe_count,
+                                 uint32_t *ne_count,
+                                 uint32_t *pe_count)
+{
+#if defined(BOARD_STM32F103)
+    if (fifo_drop_count != NULL) {
+        *fifo_drop_count = s_uart4_rx_fifo_drop_count;
+    }
+    if (ore_count != NULL) {
+        *ore_count = s_uart4_rx_ore_count;
+    }
+    if (fe_count != NULL) {
+        *fe_count = s_uart4_rx_fe_count;
+    }
+    if (ne_count != NULL) {
+        *ne_count = s_uart4_rx_ne_count;
+    }
+    if (pe_count != NULL) {
+        *pe_count = s_uart4_rx_pe_count;
+    }
+    s_uart4_rx_fifo_drop_count = 0U;
+    s_uart4_rx_ore_count = 0U;
+    s_uart4_rx_fe_count = 0U;
+    s_uart4_rx_ne_count = 0U;
+    s_uart4_rx_pe_count = 0U;
+#else
+    if (fifo_drop_count != NULL) {
+        *fifo_drop_count = 0U;
+    }
+    if (ore_count != NULL) {
+        *ore_count = 0U;
+    }
+    if (fe_count != NULL) {
+        *fe_count = 0U;
+    }
+    if (ne_count != NULL) {
+        *ne_count = 0U;
+    }
+    if (pe_count != NULL) {
+        *pe_count = 0U;
+    }
+#endif
 }
 
 void USART1_IRQHandler(void)

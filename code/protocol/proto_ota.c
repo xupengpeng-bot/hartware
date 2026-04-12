@@ -28,6 +28,22 @@ static uint8_t        s_dl_progress_reported;
 static void          *s_sha_ctx;
 static uint8_t        s_chunk[OTA_CHUNK_BYTES];
 
+static bool ota_state_accepts_duplicate_ack(ota_state_t state)
+{
+    switch (state) {
+    case OTA_STATE_DOWNLOADING:
+    case OTA_STATE_DOWNLOADED:
+    case OTA_STATE_VERIFYING:
+    case OTA_STATE_VERIFIED:
+    case OTA_STATE_WRITING:
+    case OTA_STATE_READY_TO_SWITCH:
+    case OTA_STATE_SWITCHING:
+        return true;
+    default:
+        return false;
+    }
+}
+
 static void ota_copy_cstr(char *dst, size_t cap, const char *src)
 {
     size_t i = 0U;
@@ -285,6 +301,18 @@ void proto_ota_poll(void)
         persist_progress();
         return;
     }
+    if (s_download_offset == 0U && s_sha_ctx == NULL) {
+        if (s_port->flash_erase_upgrade_region &&
+            s_port->flash_erase_upgrade_region(s_port->user) != 0) {
+            s_state = OTA_STATE_WRITE_FAILED;
+            emit_upgrade_failed(-36, "flash erase");
+            persist_progress();
+            return;
+        }
+        if (s_port->sha256_init) {
+            (void)s_port->sha256_init(&s_sha_ctx, s_port->user);
+        }
+    }
     size_t nread = 0;
     int hr = s_port->http_download_chunk(m.package_url, s_download_offset, s_chunk,
                                          sizeof(s_chunk), &nread, s_port->user);
@@ -484,15 +512,9 @@ int proto_ota_execute_action(ota_action_code_t action, const ota_prepare_payload
             set_error(-35, "download port unavailable");
             return OTA_ERR_PORT;
         }
-        if (s_port->flash_erase_upgrade_region && s_port->flash_erase_upgrade_region(s_port->user) != 0) {
-            set_error(-36, "flash erase failed");
-            return OTA_ERR_PORT;
-        }
         s_download_offset = 0U;
         s_dl_progress_reported = 0U;
-        if (s_port->sha256_init) {
-            (void)s_port->sha256_init(&s_sha_ctx, s_port->user);
-        }
+        s_sha_ctx = NULL;
         s_state = OTA_STATE_DOWNLOADING;
         {
             proto_ota_event_t ev;
@@ -542,4 +564,18 @@ int proto_ota_execute_action(ota_action_code_t action, const ota_prepare_payload
     default:
         return OTA_ERR_DENIED;
     }
+}
+
+bool proto_ota_is_prepare_duplicate_accepted(const ota_prepare_payload_t *prepare, ota_state_t *state_out)
+{
+    if (state_out != NULL) {
+        *state_out = s_state;
+    }
+    if (prepare == NULL || prepare->upgrade_ticket[0] == '\0') {
+        return false;
+    }
+    if (strcmp(s_last_upgrade_ticket, prepare->upgrade_ticket) != 0) {
+        return false;
+    }
+    return ota_state_accepts_duplicate_ack(s_state);
 }

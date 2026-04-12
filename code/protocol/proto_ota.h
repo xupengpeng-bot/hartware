@@ -40,6 +40,7 @@ int proto_ota_query_upgrade_capability(ota_upgrade_capability_t *out);
  * Returns 0 on accept; negative errno-style if rejected (map to COMMAND_NACK).
  */
 int proto_ota_execute_action(ota_action_code_t action, const ota_prepare_payload_t *prepare);
+bool proto_ota_is_prepare_duplicate_accepted(const ota_prepare_payload_t *prepare, ota_state_t *state_out);
 
 void proto_ota_set_current_version(const char *version);
 

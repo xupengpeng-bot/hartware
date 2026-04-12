@@ -51,7 +51,7 @@
 /* F103RC RAM 紧张：URC 行解析与 TCP 载荷缓存尽量小；大帧依赖 net_socket_client 聚合。 */
 #define MODEM_STREAM_CAP   640U
 #define MODEM_LINE_MAX     256U
-#define TCP_RX_FIFO_CAP    768U
+#define TCP_RX_FIFO_CAP    1536U
 #define TCP_CONNECT_ID     0U
 #define PDP_CONTEXT_ID     1U
 #define MODEM_TIME_MIN_YEAR 2024
@@ -59,7 +59,7 @@
 #define MODEM_QIRD_LINE_TIMEOUT_MS 500U
 #define MODEM_QIRD_DATA_BYTE_TIMEOUT_MS 200U
 #define MODEM_QIRD_TAIL_TIMEOUT_MS 200U
-#define MODEM_QIRD_FETCH_MAX 256U
+#define MODEM_QIRD_FETCH_MAX 768U
 #define MODEM_QIRD_PENDING_RETRY_MS 1000U
 #define MODEM_QIRD_PENDING_NO_DATA_LIMIT 8U
 
@@ -69,6 +69,7 @@ static uint8_t  s_rx_stream_saturated;
 static uint8_t  s_tcp_fifo[TCP_RX_FIFO_CAP];
 static size_t   s_tcp_head;
 static size_t   s_tcp_tail;
+static uint32_t s_tcp_fifo_drop_count;
 static int      s_online;
 static int      s_tcp_connected;
 static uint32_t s_last_online_change_ms;
@@ -107,6 +108,9 @@ static void modem_log_at_rx_line(const char *line);
 static void modem_dump_qiact_failure_diagnostics(void);
 static void modem_log_tcp_tx(const uint8_t *data, size_t len);
 static void modem_log_tcp_rx(const uint8_t *data, size_t len);
+static void modem_log_uart_rx_diag(const char *tag);
+static void modem_log_qird_header(unsigned request_len, const char *raw_line, int a, int b, int c, int fields);
+static void modem_log_qird_result(const char *tag, unsigned request_len, int read_len, unsigned data_len, unsigned unread_len);
 static void modem_set_online_state(int online, const char *reason, uint32_t monotonic_ms);
 static void modem_recovery_state_reset(void);
 static void modem_recovery_state_validate_or_reset(uint32_t monotonic_ms);
@@ -633,6 +637,7 @@ static void tcp_fifo_push(const uint8_t *p, size_t n)
         size_t next = (s_tcp_tail + 1U) % TCP_RX_FIFO_CAP;
         if (next == s_tcp_head) {
             s_tcp_head = (s_tcp_head + 1U) % TCP_RX_FIFO_CAP;
+            s_tcp_fifo_drop_count++;
         }
         s_tcp_fifo[s_tcp_tail] = p[i];
         s_tcp_tail = next;
@@ -643,6 +648,15 @@ size_t net_4g_modem_tcp_rx_pop(uint8_t *buf, size_t cap)
 {
     if (buf == NULL || cap == 0U) {
         return 0U;
+    }
+    if (s_tcp_fifo_drop_count > 0U) {
+        char line[112];
+        (void)snprintf(line, sizeof(line),
+                       "[4G] TCP RX fifo overwrite drop_bytes=%lu cap=%u\r\n",
+                       (unsigned long)s_tcp_fifo_drop_count,
+                       (unsigned)TCP_RX_FIFO_CAP);
+        bsp_debug_log(line);
+        s_tcp_fifo_drop_count = 0U;
     }
     size_t n = 0U;
     while (n < cap && s_tcp_head != s_tcp_tail) {
@@ -788,27 +802,76 @@ static void modem_log_tcp_tx(const uint8_t *data, size_t len)
     bsp_debug_log(line);
 }
 
+static void modem_hex_window(const uint8_t *data, size_t len, char *out, size_t out_cap)
+{
+    size_t pos = 0U;
+    size_t i;
+    size_t head_len;
+    size_t tail_len;
+
+    if (out == NULL || out_cap == 0U) {
+        return;
+    }
+    out[0] = '\0';
+    if (data == NULL || len == 0U) {
+        return;
+    }
+
+    head_len = len > 8U ? 8U : len;
+    for (i = 0U; i < head_len && pos + 4U < out_cap; i++) {
+        int wrote = snprintf(out + pos, out_cap - pos, "%02X%s",
+                             (unsigned)data[i],
+                             (i + 1U < head_len) ? " " : "");
+        if (wrote <= 0) {
+            return;
+        }
+        pos += (size_t)wrote;
+    }
+
+    if (len > head_len && pos + 6U < out_cap) {
+        int wrote = snprintf(out + pos, out_cap - pos, " .. ");
+        if (wrote <= 0) {
+            return;
+        }
+        pos += (size_t)wrote;
+    }
+
+    tail_len = len > 8U ? 8U : 0U;
+    for (i = (tail_len > 0U) ? (len - tail_len) : len; i < len && pos + 4U < out_cap; i++) {
+        int wrote = snprintf(out + pos, out_cap - pos, "%02X%s",
+                             (unsigned)data[i],
+                             (i + 1U < len) ? " " : "");
+        if (wrote <= 0) {
+            return;
+        }
+        pos += (size_t)wrote;
+    }
+}
+
 static void modem_log_tcp_rx(const uint8_t *data, size_t len)
 {
-    char line[220];
+    char line[320];
+    char hex[96];
     uint32_t be_len = 0U;
     size_t json_len;
 
     if (data == NULL || len == 0U) {
         return;
     }
+    modem_hex_window(data, len, hex, sizeof(hex));
     if (len >= 4U) {
         be_len = ((uint32_t)data[0] << 24) | ((uint32_t)data[1] << 16) |
                  ((uint32_t)data[2] << 8) | (uint32_t)data[3];
         if ((size_t)be_len + 4U > len) {
             size_t shown = len > 120U ? 120U : len;
             (void)snprintf(line, sizeof(line),
-                           "[TCP-RX] chunk_len=%lu partial_prefix=%lu bytes=%.*s%s\r\n",
+                           "[TCP-RX] chunk_len=%lu partial_prefix=%lu bytes=%.*s%s hex=%s\r\n",
                            (unsigned long)len,
                            (unsigned long)be_len,
                            (int)shown,
                            (const char *)data,
-                           len > shown ? "..." : "");
+                           len > shown ? "..." : "",
+                           hex);
             bsp_debug_log(line);
             return;
         }
@@ -817,15 +880,88 @@ static void modem_log_tcp_rx(const uint8_t *data, size_t len)
             json_len = 120U;
         }
         (void)snprintf(line, sizeof(line),
-                       "[TCP-RX] frame_len=%lu prefix=%lu json=%.*s%s\r\n",
+                       "[TCP-RX] frame_len=%lu prefix=%lu json=%.*s%s hex=%s\r\n",
                        (unsigned long)len,
                        (unsigned long)be_len,
                        (int)json_len,
                        (const char *)(data + 4U),
-                       (len - 4U) > json_len ? "..." : "");
+                       (len - 4U) > json_len ? "..." : "",
+                       hex);
     } else {
-        (void)snprintf(line, sizeof(line), "[TCP-RX] short frame len=%lu\r\n", (unsigned long)len);
+        (void)snprintf(line, sizeof(line), "[TCP-RX] short frame len=%lu hex=%s\r\n",
+                       (unsigned long)len, hex);
     }
+    bsp_debug_log(line);
+}
+
+static void modem_log_uart_rx_diag(const char *tag)
+{
+    uint32_t fifo_drop = 0U;
+    uint32_t ore = 0U;
+    uint32_t fe = 0U;
+    uint32_t ne = 0U;
+    uint32_t pe = 0U;
+
+    bsp_uart_modem_take_rx_diag(&fifo_drop, &ore, &fe, &ne, &pe);
+    if (fifo_drop == 0U && ore == 0U && fe == 0U && ne == 0U && pe == 0U) {
+        return;
+    }
+
+    {
+        char line[176];
+        (void)snprintf(line, sizeof(line),
+                       "[4G] UART4 rx diag tag=%s fifo_drop=%lu ore=%lu fe=%lu ne=%lu pe=%lu\r\n",
+                       tag != NULL ? tag : "unknown",
+                       (unsigned long)fifo_drop,
+                       (unsigned long)ore,
+                       (unsigned long)fe,
+                       (unsigned long)ne,
+                       (unsigned long)pe);
+        bsp_debug_log(line);
+    }
+}
+
+static void modem_log_qird_header(unsigned request_len, const char *raw_line, int a, int b, int c, int fields)
+{
+    char line[224];
+    size_t raw_len = 0U;
+
+    if (raw_line != NULL) {
+        raw_len = strlen(raw_line);
+        if (raw_len > 96U) {
+            raw_len = 96U;
+        }
+    }
+    (void)snprintf(line, sizeof(line),
+                   "[4G] QIRD header req=%u fields=%d parsed=%d,%d,%d raw=%.*s\r\n",
+                   request_len,
+                   fields,
+                   a,
+                   b,
+                   c,
+                   (int)raw_len,
+                   raw_line != NULL ? raw_line : "");
+    bsp_debug_log(line);
+}
+
+static void modem_log_qird_result(const char *tag, unsigned request_len, int read_len, unsigned data_len, unsigned unread_len)
+{
+    char line[176];
+    unsigned pending_hint = 0U;
+
+    if (data_len > (unsigned)read_len) {
+        pending_hint = (data_len - (unsigned)read_len) + unread_len;
+    } else {
+        pending_hint = unread_len;
+    }
+    (void)snprintf(line, sizeof(line),
+                   "[4G] QIRD result tag=%s req=%u read=%d data=%u unread=%u pending_hint=%u\r\n",
+                   tag != NULL ? tag : "unknown",
+                   request_len,
+                   read_len,
+                   data_len,
+                   unread_len,
+                   pending_hint);
     bsp_debug_log(line);
 }
 
@@ -1344,6 +1480,7 @@ static int modem_qird_fetch(unsigned request_len, modem_qird_result_t *result)
         (void)snprintf(logline, sizeof(logline), "[4G] QIRD fetch request_len=%u\r\n", request_len);
         bsp_debug_log(logline);
     }
+    modem_log_uart_rx_diag("pre_qird");
     (void)snprintf(cmd, sizeof(cmd), "AT+QIRD=%u,%u\r\n", TCP_CONNECT_ID, (unsigned)request_len);
     if (modem_write_str(cmd) < 0) {
         return -1;
@@ -1374,11 +1511,14 @@ static int modem_qird_fetch(unsigned request_len, modem_qird_result_t *result)
             int b = 0;
             int c = 0;
             if (sscanf(line, "+QIRD: %d,%d,%d", &a, &b, &c) == 3) {
+                modem_log_qird_header(request_len, line, a, b, c, 3);
                 n_data = b;
                 unread_len = (c > 0) ? (unsigned)c : 0U;
             } else if (sscanf(line, "+QIRD: %d", &a) == 1) {
+                modem_log_qird_header(request_len, line, a, 0, 0, 1);
                 n_data = a;
             } else {
+                modem_log_qird_header(request_len, line, a, b, c, 0);
                 return -1;
             }
             break;
@@ -1394,6 +1534,7 @@ static int modem_qird_fetch(unsigned request_len, modem_qird_result_t *result)
             result->data_len = 0U;
             result->unread_len = unread_len;
         }
+        modem_log_qird_result("empty", request_len, 0, 0U, unread_len);
         for (;;) {
             int ch = modem_getch_ms(MODEM_QIRD_TAIL_TIMEOUT_MS);
             if (ch < 0) {
@@ -1435,9 +1576,12 @@ static int modem_qird_fetch(unsigned request_len, modem_qird_result_t *result)
                                        "[4G] QIRD partial payload read=%d/%d, keep TCP alive\r\n",
                                        total_read, n_data);
                         bsp_debug_log(part);
+                        modem_log_qird_result("partial", request_len, total_read, (unsigned)n_data, unread_len);
+                        modem_log_uart_rx_diag("partial_qird");
                         return total_read;
                     }
                     bsp_debug_log("[4G] QIRD timeout waiting payload byte\r\n");
+                    modem_log_uart_rx_diag("qird_timeout");
                     return -1;
                 }
                 tmp[read_in_chunk++] = (uint8_t)ch;
@@ -1450,11 +1594,13 @@ static int modem_qird_fetch(unsigned request_len, modem_qird_result_t *result)
     }
 
     (void)modem_wait_line_ok_or_err(MODEM_QIRD_TAIL_TIMEOUT_MS);
+    modem_log_uart_rx_diag("post_qird");
     if (result != NULL) {
         result->read_len = n_data;
         result->data_len = (unsigned)n_data;
         result->unread_len = unread_len;
     }
+    modem_log_qird_result("complete", request_len, n_data, (unsigned)n_data, unread_len);
     return n_data;
 }
 
@@ -1486,12 +1632,20 @@ static void handle_urc_line(const char *line)
                 if (p2 != NULL) {
                     p2++;
                     recv_len = (unsigned)strtoul(p2, NULL, 10);
-                    if (recv_len == 0U || recv_len > 512U) {
-                        recv_len = 512U;
+                    if (recv_len == 0U || recv_len > MODEM_QIRD_FETCH_MAX) {
+                        recv_len = MODEM_QIRD_FETCH_MAX;
                     }
                 }
             }
         }
+    }
+    {
+        char linebuf[112];
+        (void)snprintf(linebuf, sizeof(linebuf),
+                       "[4G] TCP recv URC announced=%u pending_before=%u\r\n",
+                       recv_len,
+                       s_qird_pending_len);
+        bsp_debug_log(linebuf);
     }
     {
         modem_qird_result_t qird;
@@ -2008,8 +2162,18 @@ void net_4g_modem_poll(uint32_t monotonic_ms)
             (int32_t)(monotonic_ms - s_qird_pending_retry_after_ms) < 0) {
             goto pending_qird_done;
         }
-        unsigned request_len = s_qird_pending_len > 512U ? 512U : s_qird_pending_len;
+        unsigned request_len = s_qird_pending_len > MODEM_QIRD_FETCH_MAX ? MODEM_QIRD_FETCH_MAX : s_qird_pending_len;
         modem_qird_result_t qird;
+        {
+            char linebuf[144];
+            (void)snprintf(linebuf, sizeof(linebuf),
+                           "[4G] QIRD pending fetch start remain=%u request=%u no_data_streak=%u fail_streak=%u\r\n",
+                           s_qird_pending_len,
+                           request_len,
+                           (unsigned)s_qird_pending_no_data_streak,
+                           (unsigned)s_qird_fail_streak);
+            bsp_debug_log(linebuf);
+        }
         int fetch_rc = modem_qird_fetch(request_len, &qird);
         if (fetch_rc < 0) {
             s_qird_fail_streak++;

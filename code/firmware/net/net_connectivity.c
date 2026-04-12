@@ -286,7 +286,7 @@ static void net_note_tx_context(const char *json_body, size_t json_len, uint32_t
         return;
     }
     memset(type_buf, 0, sizeof(type_buf));
-    if (proto_json_get_string(json_body, "type", type_buf, sizeof(type_buf)) != 0 || type_buf[0] == '\0') {
+    if (proto_json_get_string(json_body, "t", type_buf, sizeof(type_buf)) != 0 || type_buf[0] == '\0') {
         (void)strncpy(type_buf, "UNKNOWN", sizeof(type_buf) - 1U);
     }
     (void)strncpy(s_last_tx_type, type_buf, sizeof(s_last_tx_type) - 1U);

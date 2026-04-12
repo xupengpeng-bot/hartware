@@ -8,6 +8,11 @@
 
 int bsp_uart_write(int port, const uint8_t *data, size_t len);
 int bsp_uart_read(int port, uint8_t *buf, size_t cap);
+void bsp_uart_modem_take_rx_diag(uint32_t *fifo_drop_count,
+                                 uint32_t *ore_count,
+                                 uint32_t *fe_count,
+                                 uint32_t *ne_count,
+                                 uint32_t *pe_count);
 
 void bsp_uart_modem_init(void);
 void bsp_uart_rs485_init(uint32_t baud);
