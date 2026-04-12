@@ -30,6 +30,7 @@ static uint32_t s_last_tx_ms;
 static uint8_t s_register_pending;
 static uint8_t s_register_inflight;
 static uint8_t s_register_retry_stage;
+static uint8_t s_paused_for_ota;
 static size_t   s_last_tx_len;
 static uint32_t s_register_retry_prng;
 static char     s_last_tx_type[32];
@@ -426,6 +427,31 @@ void net_connectivity_force_reconnect(void)
     net_handle_disconnect("local_reset", s_last_poll_ms, 0U);
 }
 
+void net_connectivity_pause_for_ota(void)
+{
+    if (s_paused_for_ota != 0U) {
+        return;
+    }
+    s_paused_for_ota = 1U;
+    if (s_sock.connected != 0 || net_4g_modem_tcp_is_connected() != 0) {
+        net_handle_disconnect("ota_pause", s_last_poll_ms, 0U);
+    } else {
+        common_status_set_tcp_connected(false);
+        common_status_set_registered(false);
+    }
+}
+
+void net_connectivity_resume_after_ota(void)
+{
+    if (s_paused_for_ota == 0U) {
+        return;
+    }
+    s_paused_for_ota = 0U;
+    s_register_pending = 1U;
+    s_register_inflight = 0U;
+    net_register_retry_reset();
+}
+
 void net_connectivity_on_register_ack(void)
 {
     common_status_set_registered(true);
@@ -461,6 +487,7 @@ void net_connectivity_init(void)
     s_register_inflight = 0U;
     s_register_retry_stage = 0U;
     s_register_retry_prng = 0x5A17U;
+    s_paused_for_ota = 0U;
     memset(s_last_tx_type, 0, sizeof(s_last_tx_type));
     common_status_set_online(net_4g_modem_is_online());
     common_status_set_tcp_connected(false);
@@ -481,6 +508,12 @@ void net_connectivity_poll(uint32_t monotonic_ms)
     was_online = (status_snapshot != NULL && status_snapshot->online) ? 1U : 0U;
     modem_online = net_4g_modem_is_online() ? 1U : 0U;
     common_status_set_online(modem_online != 0U);
+
+    if (s_paused_for_ota != 0U) {
+        common_status_set_tcp_connected(false);
+        common_status_set_registered(false);
+        return;
+    }
 
     if (modem_online == 0U) {
         if (s_sock.connected != 0 || was_online != 0U) {

@@ -178,11 +178,13 @@ static void cb_ota_event(const proto_ota_event_t *event, void *user)
         report.progress_percent = 100U;
         break;
     case OTA_EVENT_OTA_UPGRADE_SUCCEEDED:
+        net_connectivity_resume_after_ota();
         ota_copy_text(report.stage, sizeof(report.stage), "succeeded");
         ota_copy_text(report.result, sizeof(report.result), "succeeded");
         report.progress_percent = 100U;
         break;
     case OTA_EVENT_OTA_UPGRADE_FAILED:
+        net_connectivity_resume_after_ota();
         ota_copy_text(report.stage, sizeof(report.stage), "failed");
         ota_copy_text(report.result, sizeof(report.result), "failed");
         ota_copy_text(report.reason_code, sizeof(report.reason_code), "exec_failed");

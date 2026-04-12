@@ -57,10 +57,10 @@
 #define MODEM_TIME_MIN_YEAR 2024
 #define MODEM_TIME_MAX_YEAR 2039
 #define MODEM_QIRD_LINE_TIMEOUT_MS 500U
-#define MODEM_QIRD_DATA_BYTE_TIMEOUT_MS 50U
+#define MODEM_QIRD_DATA_BYTE_TIMEOUT_MS 200U
 #define MODEM_QIRD_TAIL_TIMEOUT_MS 200U
-#define MODEM_QIRD_PENDING_RETRY_MS 500U
-#define MODEM_QIRD_PENDING_NO_DATA_LIMIT 3U
+#define MODEM_QIRD_PENDING_RETRY_MS 1000U
+#define MODEM_QIRD_PENDING_NO_DATA_LIMIT 8U
 
 static uint8_t  s_rx_stream[MODEM_STREAM_CAP];
 static size_t   s_rx_len;
@@ -2015,14 +2015,15 @@ void net_4g_modem_poll(uint32_t monotonic_ms)
             s_qird_pending_no_data_streak++;
             s_qird_pending_retry_after_ms = monotonic_ms + MODEM_QIRD_PENDING_RETRY_MS;
             if (s_qird_pending_no_data_streak >= MODEM_QIRD_PENDING_NO_DATA_LIMIT) {
-                char linebuf[144];
+                char linebuf[160];
+                /* A short UART read can leave us with a synthetic "pending" tail even when the
+                 * modem socket is still healthy. Drop the stale tail instead of tearing TCP down. */
                 (void)snprintf(linebuf, sizeof(linebuf),
-                               "[4G] QIRD pending no-data streak=%u remain=%u, mark TCP disconnected\r\n",
+                               "[4G] QIRD pending no-data streak=%u remain=%u, drop stale tail and keep TCP alive\r\n",
                                (unsigned)s_qird_pending_no_data_streak,
                                s_qird_pending_len);
                 bsp_debug_log(linebuf);
                 modem_reset_qird_pending_state();
-                s_tcp_connected = 0;
             } else {
                 char linebuf[120];
                 (void)snprintf(linebuf, sizeof(linebuf),
