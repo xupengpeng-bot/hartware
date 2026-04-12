@@ -49,7 +49,7 @@
 #define MODEM_RETRY_PRE_KEY_MS     1500U
 
 /* F103RC RAM 紧张：URC 行解析与 TCP 载荷缓存尽量小；大帧依赖 net_socket_client 聚合。 */
-#define MODEM_STREAM_CAP   376U
+#define MODEM_STREAM_CAP   640U
 #define MODEM_LINE_MAX     256U
 #define TCP_RX_FIFO_CAP    768U
 #define TCP_CONNECT_ID     0U
@@ -59,11 +59,13 @@
 #define MODEM_QIRD_LINE_TIMEOUT_MS 500U
 #define MODEM_QIRD_DATA_BYTE_TIMEOUT_MS 200U
 #define MODEM_QIRD_TAIL_TIMEOUT_MS 200U
+#define MODEM_QIRD_FETCH_MAX 256U
 #define MODEM_QIRD_PENDING_RETRY_MS 1000U
 #define MODEM_QIRD_PENDING_NO_DATA_LIMIT 8U
 
 static uint8_t  s_rx_stream[MODEM_STREAM_CAP];
 static size_t   s_rx_len;
+static uint8_t  s_rx_stream_saturated;
 static uint8_t  s_tcp_fifo[TCP_RX_FIFO_CAP];
 static size_t   s_tcp_head;
 static size_t   s_tcp_tail;
@@ -521,6 +523,7 @@ static void modem_drain_hw_rx(void)
     uint8_t ch;
     while (bsp_uart_read((int)BOARD_HW_UART_PORT_MODEM_4G, &ch, 1U) > 0) {
     }
+    s_rx_stream_saturated = 0U;
 }
 
 static void stream_push_from_uart(void)
@@ -530,8 +533,15 @@ static void stream_push_from_uart(void)
         if (s_rx_len < MODEM_STREAM_CAP) {
             s_rx_stream[s_rx_len++] = ch;
         } else {
-            memmove(s_rx_stream, s_rx_stream + 1U, MODEM_STREAM_CAP - 1U);
-            s_rx_stream[MODEM_STREAM_CAP - 1U] = ch;
+            if (s_rx_stream_saturated == 0U) {
+                char line[120];
+                (void)snprintf(line, sizeof(line),
+                               "[4G] RX stream full at %u bytes, defer further UART reads to preserve unread data\r\n",
+                               (unsigned)MODEM_STREAM_CAP);
+                bsp_debug_log(line);
+                s_rx_stream_saturated = 1U;
+            }
+            break;
         }
     }
 }
@@ -606,6 +616,9 @@ static int modem_getch_ms(uint32_t timeout_ms)
             uint8_t b = s_rx_stream[0];
             memmove(s_rx_stream, s_rx_stream + 1U, s_rx_len - 1U);
             s_rx_len--;
+            if (s_rx_stream_saturated != 0U && s_rx_len < MODEM_STREAM_CAP) {
+                s_rx_stream_saturated = 0U;
+            }
             return (int)b;
         }
         bsp_system_delay_ms(1U);
@@ -1323,8 +1336,8 @@ static int modem_qird_fetch(unsigned request_len, modem_qird_result_t *result)
         return 0;
     }
     /* 单次读取与 TCP 缓存匹配，剩余数据由下一次 +QIURC 再拉取 */
-    if (request_len > 512U) {
-        request_len = 512U;
+    if (request_len > MODEM_QIRD_FETCH_MAX) {
+        request_len = MODEM_QIRD_FETCH_MAX;
     }
     {
         char logline[96];
@@ -1548,6 +1561,9 @@ static void modem_process_stream_lines(void)
         size_t consume = i + 1U;
         memmove(s_rx_stream, s_rx_stream + consume, s_rx_len - consume);
         s_rx_len -= consume;
+        if (s_rx_stream_saturated != 0U && s_rx_len < MODEM_STREAM_CAP) {
+            s_rx_stream_saturated = 0U;
+        }
 
         if (line_len > 0U) {
             handle_urc_line(line);
@@ -1672,6 +1688,7 @@ void net_4g_modem_init(void)
     s_online = 0;
     s_tcp_connected = 0;
     s_rx_len = 0U;
+    s_rx_stream_saturated = 0U;
     s_tcp_head = 0U;
     s_tcp_tail = 0U;
     s_last_online_change_ms = 0U;
