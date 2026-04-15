@@ -7,6 +7,8 @@ Desktop.ini
 *.bak
 .vscode/
 .idea/
+build_codex_arm/
+build_codex_check/
 
 # Hardware/3.0 embedded — build outputs
 **/build/
@@ -14,6 +16,12 @@ Desktop.ini
 **/CMakeFiles/
 **/CMakeCache.txt
 **/cmake_install.cmake
+**/.ninja_deps
+**/.ninja_log
+**/build.ninja
+**/*.a
+**/controller_fw
+**/controller_fw_standalone
 **/*.o
 **/*.obj
 **/*.elf
