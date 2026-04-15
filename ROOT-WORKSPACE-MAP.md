@@ -2,103 +2,90 @@
 
 Status: active
 Audience: PM, engineers, AI agents
-Purpose: define which root-level workspaces are formal, which are auxiliary, and which must not be treated as active truth by default.
+Purpose: define which local directories are the current active truth, which are sidecar, and which are scratch-only.
 
 ## Root
 
 - workspace root:
-  - `D:\20251211\zhinengti`
+  - `D:\Develop\houji\houjinongfuAI-Cursor`
 
 ## Current classification
 
-### Formal active workspaces
+### Formal active repositories
 
-These are part of the current active delivery chain and should stay stable during the current verification round.
+These are the default active repositories for the current local delivery chain.
 
-- `D:\20251211\zhinengti\houjinongfuai`
-  - role: business-code repository
+- `D:\Develop\houji\houjinongfuAI-Cursor\hartware`
+  - role: embedded firmware and device-side protocol truth
   - status: formal active
-- `D:\20251211\zhinengti\lovable`
-  - role: formal frontend repository
+- `D:\Develop\houji\houjinongfuAI-Cursor\houjinongfuai-working`
+  - role: backend and formal business/protocol documents
   - status: formal active
-- `D:\20251211\zhinengti\development-system`
-  - role: development-system repository
+- `D:\Develop\houji\houjinongfuAI-Cursor\lovable-working`
+  - role: main frontend workspace
   - status: formal active
 
-### Research or sidecar workspaces
+### Sidecar but active-in-workspace repository
 
-These may be useful, but they are not the default truth source for the current business mainline.
+- `D:\Develop\houji\houjinongfuAI-Cursor\waterflow-control`
+  - role: sidecar demo / upstream reference
+  - status: sidecar active
+  - note: useful in the current workspace, but not the final business truth when contracts conflict
 
-- `D:\20251211\zhinengti\external\waterflow-control`
-  - role: external or research project
-  - status: sidecar
+### Parallel sibling clones
 
-### Temporary or verification-only workspaces
+These are valid repositories, but they are not the default truth for this workspace container.
+
+- `D:\Develop\houji\houjinongfuai`
+  - role: parallel backend clone
+  - status: reference only by default
+- `D:\Develop\houji\lovable`
+  - role: parallel frontend clone
+  - status: reference only by default
+- `D:\Develop\houji\waterflow-control`
+  - role: parallel sidecar clone
+  - status: reference only by default
+
+### Temporary or scratch-only directories
 
 These must not be treated as default active truth.
 
-- `D:\20251211\zhinengti\lovable-accept-4012`
-  - role: temporary acceptance or verification clone
-  - status: temporary
-  - note: currently not on a normal branch (`HEAD detached`)
-
-### Local utility or scratch workspaces
-
-These are not active Git truth sources for the current delivery chain.
-
-- `D:\20251211\zhinengti\analyze`
-  - role: local analysis or scratch directory
-  - status: local-only
-- `D:\20251211\zhinengti\codexAgaent`
-  - role: local tool or scratch directory
-  - status: local-only
+- `D:\Develop\houji\houjinongfuAI-Cursor\tmp`
+  - role: temporary workspace artifacts
+  - status: local-only scratch
+- `D:\Develop\houji\houjinongfuAI-Cursor\tmp-hw-review`
+  - role: review/reference repository
+  - status: reference only
+- `D:\Develop\houji\houjinongfuAI-Cursor\ota-pub`
+  - role: local publication/output helper directory
+  - status: local-only helper
 
 ## Current judgement
 
-For the current round, do not move the three formal active workspaces:
+For the current round:
 
-1. `houjinongfuai`
-2. `lovable`
-3. `development-system`
+1. use the repositories inside `D:\Develop\houji\houjinongfuAI-Cursor` as the default local truth
+2. treat sibling clones under `D:\Develop\houji\` as reference unless the task explicitly switches to them
+3. keep temporary logs, screenshots, scratch scripts, and comparison outputs under `tmp/`
+4. do not treat `tmp-hw-review/` as the embedded truth source
 
-Moving them now would create more risk than value because:
+## Embedded-specific rule
 
-- scripts and onboarding are already aligned to these locations
-- the new-machine environment has just been stabilized
-- verification should not be interrupted by directory migration
+For embedded protocol, OTA, and device behavior:
 
-## What should be adjusted now
-
-Adjust classification, not physical paths.
-
-Immediate recommendation:
-
-1. keep `houjinongfuai`, `lovable`, and `development-system` exactly where they are for this round
-2. treat `lovable-accept-4012` as temporary and do not let AI read it by default
-3. treat `external\waterflow-control` as research or sidecar only
-4. treat `analyze` and `codexAgaent` as local scratch areas, not delivery truth
-
-## What can wait until after verification
-
-After this verification round, root-level cleanup can be done safely.
-
-Recommended future target structure:
-
-- `projects\`
-  - formal business projects
-- `systems\`
-  - development-system and shared automation
-- `labs\`
-  - research and external explorations
-- `scratch\`
-  - temporary clones, acceptance copies, and throwaway local work
+1. default truth is the current local `D:\Develop\houji\houjinongfuAI-Cursor\hartware`
+2. product-specific valve-control work defaults to:
+   - `D:\Develop\houji\houjinongfuAI-Cursor\hartware\products\SCAN-IRR-VALVE-CTRL-4G-A01`
+3. remote repositories and historical branches are reference only unless explicitly requested
 
 ## AI read rule
 
-Unless PM explicitly dispatches otherwise, AI should read only:
+Unless the current task explicitly says otherwise, AI should read only:
 
-1. `D:\20251211\zhinengti\houjinongfuai`
-2. `D:\20251211\zhinengti\development-system`
-3. `D:\20251211\zhinengti\lovable` when the active task requires frontend `SYNC` or `VERIFY`
+1. root docs under `D:\Develop\houji\houjinongfuAI-Cursor`
+2. `D:\Develop\houji\houjinongfuAI-Cursor\houjinongfuai-working`
+3. `D:\Develop\houji\houjinongfuAI-Cursor\lovable-working` when frontend work is active
+4. `D:\Develop\houji\houjinongfuAI-Cursor\hartware` for embedded work
+5. `D:\Develop\houji\houjinongfuAI-Cursor\waterflow-control` only when the sidecar demo is relevant
 
-AI must not treat `lovable-accept-4012`, `external`, `analyze`, or `codexAgaent` as default truth sources.
+AI must not treat sibling clones, `tmp/`, or `tmp-hw-review/` as default truth sources.
