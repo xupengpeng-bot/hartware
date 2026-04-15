@@ -78,6 +78,20 @@ int proto_dispatch_handle_inbound(const char *json, size_t json_len,
         }
         return r < 0 ? r : 0;
     }
+    if ((strcmp(type_buf, PROTO_MSG_REGISTER_ACK) == 0 || strcmp(type_buf, PROTO_MSG_COMMAND_ACK) == 0) &&
+        s_handlers->on_register_ack != NULL) {
+        s_handlers->on_register_ack(s_handlers->user);
+        return 0;
+    }
+    if ((strcmp(type_buf, PROTO_MSG_REGISTER_NACK) == 0 || strcmp(type_buf, PROTO_MSG_COMMAND_NACK) == 0) &&
+        s_handlers->on_register_nack != NULL) {
+        s_handlers->on_register_nack(s_handlers->user);
+        return 0;
+    }
+    if (strcmp(type_buf, PROTO_MSG_QUERY_RESULT) == 0 && s_handlers->on_query_result != NULL) {
+        s_handlers->on_query_result(json, json_len, s_handlers->user);
+        return 0;
+    }
     if (strcmp(type_buf, PROTO_MSG_EXECUTE_ACTION) == 0 && s_handlers->on_execute_action != NULL && out_reply != NULL) {
         r = s_handlers->on_execute_action(json, json_len, out_reply, out_reply_cap, s_handlers->user);
         if (r >= 0 && out_reply_len != NULL) {

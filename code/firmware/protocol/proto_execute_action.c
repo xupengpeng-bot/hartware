@@ -1,6 +1,7 @@
 #include "proto_execute_action.h"
 
 #include "config_store.h"
+#include "ota_port_board.h"
 #include "proto_ota.h"
 #include "proto_codec_json.h"
 #include "proto_command.h"
@@ -13,6 +14,116 @@
 
 #include <stdio.h>
 #include <string.h>
+
+#ifndef FW_PROTO_VERBOSE_LOG
+#define FW_PROTO_VERBOSE_LOG 1
+#endif
+
+#if !FW_PROTO_VERBOSE_LOG
+#define bsp_debug_log(...) ((void)0)
+#endif
+
+#define REMOTE_REBOOT_DELAY_MS 1000U
+#define OTA_START_AFTER_ACK_MS 1000U
+
+static uint8_t  s_remote_reboot_pending_ack;
+static uint8_t  s_remote_reboot_armed;
+static uint32_t s_remote_reboot_due_ms;
+static uint8_t  s_ota_start_pending_ack;
+static uint8_t  s_ota_start_armed;
+static uint32_t s_ota_start_due_ms;
+
+static int code_matches_after_removing_one_adjacent_duplicate(const char *raw, const char *expected)
+{
+    size_t raw_len;
+    size_t expected_len;
+    size_t dup_index;
+
+    if (raw == NULL || expected == NULL) {
+        return 0;
+    }
+    raw_len = strlen(raw);
+    expected_len = strlen(expected);
+    if (raw_len != expected_len + 1U) {
+        return 0;
+    }
+
+    for (dup_index = 0U; dup_index + 1U < raw_len; dup_index++) {
+        size_t ri = 0U;
+        size_t ei = 0U;
+        uint8_t skipped = 0U;
+
+        if (raw[dup_index] != raw[dup_index + 1U]) {
+            continue;
+        }
+        while (ri < raw_len && ei < expected_len) {
+            if (skipped == 0U && ri == dup_index) {
+                ri++;
+                skipped = 1U;
+                continue;
+            }
+            if (raw[ri] != expected[ei]) {
+                break;
+            }
+            ri++;
+            ei++;
+        }
+        if (skipped == 0U && ri == dup_index) {
+            ri++;
+            skipped = 1U;
+        }
+        if (skipped != 0U && ri == raw_len && ei == expected_len) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void normalize_known_short_code(char *value, size_t value_cap, const char *label,
+                                       const char *const *known_codes, size_t known_code_count)
+{
+    char raw_value[32];
+    size_t i;
+
+    if (value == NULL || value_cap == 0U || value[0] == '\0' ||
+        known_codes == NULL || known_code_count == 0U) {
+        return;
+    }
+
+    (void)snprintf(raw_value, sizeof(raw_value), "%s", value);
+    for (i = 0U; i < known_code_count; i++) {
+        if (strcmp(raw_value, known_codes[i]) == 0) {
+            return;
+        }
+    }
+
+    for (i = 0U; i < known_code_count; i++) {
+        if (code_matches_after_removing_one_adjacent_duplicate(raw_value, known_codes[i]) != 0) {
+            char line[160];
+            (void)snprintf(value, value_cap, "%s", known_codes[i]);
+            (void)snprintf(line, sizeof(line),
+                           "[PROTO] EX normalized %s raw=%s -> %s\r\n",
+                           label != NULL ? label : "code",
+                           raw_value,
+                           value);
+            bsp_debug_log(line);
+            return;
+        }
+    }
+}
+
+static int finalize_action_reply(char *reply, size_t reply_cap, const char *corr,
+                                 const char *scope, const char *action,
+                                 const char *target, int rc)
+{
+    (void)reply;
+    (void)reply_cap;
+    (void)corr;
+    (void)scope;
+    (void)action;
+    (void)target;
+    return rc;
+}
 
 static void log_json_parse_failure(const char *tag, const char *json, size_t json_len)
 {
@@ -100,6 +211,32 @@ static void read_optional_string_alias(const cJSON *obj, const char *primary_key
         read_optional_string(obj, alias_key, out, out_cap);
     }
 }
+
+static void read_optional_raw_json_string(const char *json, const char *primary_key, const char *alias_key,
+                                          const char *alias_key2, char *out, size_t out_cap)
+{
+    if (out == NULL || out_cap == 0U) {
+        return;
+    }
+    out[0] = '\0';
+    if (json == NULL) {
+        return;
+    }
+    if (primary_key != NULL && proto_json_get_string(json, primary_key, out, out_cap) == 0 && out[0] != '\0') {
+        return;
+    }
+    if (alias_key != NULL && proto_json_get_string(json, alias_key, out, out_cap) == 0 && out[0] != '\0') {
+        return;
+    }
+    if (alias_key2 != NULL) {
+        (void)proto_json_get_string(json, alias_key2, out, out_cap);
+    }
+}
+
+static const char *map_ota_reject_code(int result, const ota_upgrade_status_t *status);
+static const char *map_ota_reject_message(int result, const ota_upgrade_status_t *status);
+static const char *map_ota_idempotent_stage(ota_state_t state);
+static void ota_start_request_after_ack(void);
 
 static const char *resolve_reply_session_ref(const char *explicit_session_ref, const char *detail_json)
 {
@@ -289,6 +426,8 @@ static int parse_upgrade_prepare_payload(const cJSON *source, ota_prepare_payloa
                                     out->package_sha256_hex, sizeof(out->package_sha256_hex));
     read_optional_json_string_alias(source, "package_format", "fmt", NULL,
                                     out->package_format, sizeof(out->package_format));
+    read_optional_json_string_alias(source, "package_etag", "etag", NULL,
+                                    out->package_etag, sizeof(out->package_etag));
     if (out->package_format[0] == '\0') {
         (void)snprintf(out->package_format, sizeof(out->package_format), "raw-bin");
     }
@@ -299,6 +438,9 @@ static int parse_upgrade_prepare_payload(const cJSON *source, ota_prepare_payloa
         cJSON *size_item = cJSON_GetObjectItemCaseSensitive((cJSON *)source, "package_size_bytes");
         if (!cJSON_IsNumber(size_item)) {
             size_item = cJSON_GetObjectItemCaseSensitive((cJSON *)source, "package_size");
+        }
+        if (!cJSON_IsNumber(size_item)) {
+            size_item = cJSON_GetObjectItemCaseSensitive((cJSON *)source, "sz");
         }
         if (cJSON_IsNumber(size_item)) {
             size_bytes = (uint32_t)(size_item->valuedouble > 0 ? size_item->valuedouble : 0);
@@ -322,23 +464,157 @@ static int parse_upgrade_prepare_payload(const cJSON *source, ota_prepare_payloa
     }
 
     if (out->upgrade_ticket[0] == '\0' ||
-        out->upgrade_job_id[0] == '\0' ||
-        out->upgrade_item_id[0] == '\0' ||
-        out->release_id[0] == '\0' ||
         out->release_code[0] == '\0' ||
-        out->package_artifact_id[0] == '\0' ||
         out->package_url[0] == '\0' ||
         out->package_sha256_hex[0] == '\0' ||
+        out->package_etag[0] == '\0' ||
         out->package_size == 0U) {
         return -1;
     }
     return 0;
 }
 
-static const char *map_ota_reject_code(int result)
+static int parse_upgrade_prepare_payload_tolerant(const char *json, ota_prepare_payload_t *out)
+{
+    const ota_upgrade_capability_t *cap;
+    uint32_t size_bytes = 0U;
+    uint8_t bool_value = 0U;
+
+    if (json == NULL || out == NULL) {
+        return -1;
+    }
+
+    memset(out, 0, sizeof(*out));
+    cap = proto_ota_get_capability();
+    out->min_battery_soc = cap != NULL ? cap->min_battery_soc_default : 30U;
+    out->min_signal_csq = cap != NULL ? cap->min_signal_csq_default : 8;
+    out->auto_commit = true;
+
+    read_optional_raw_json_string(json, "upgrade_token", "ut", "upgrade_ticket",
+                                  out->upgrade_ticket, sizeof(out->upgrade_ticket));
+    read_optional_raw_json_string(json, "upgrade_job_id", "uj", NULL,
+                                  out->upgrade_job_id, sizeof(out->upgrade_job_id));
+    read_optional_raw_json_string(json, "upgrade_item_id", "ui", NULL,
+                                  out->upgrade_item_id, sizeof(out->upgrade_item_id));
+    read_optional_raw_json_string(json, "release_id", "rid", NULL,
+                                  out->release_id, sizeof(out->release_id));
+    read_optional_raw_json_string(json, "release_code", "rcd", "target_version",
+                                  out->release_code, sizeof(out->release_code));
+    read_optional_raw_json_string(json, "package_artifact_id", "aid", NULL,
+                                  out->package_artifact_id, sizeof(out->package_artifact_id));
+    read_optional_raw_json_string(json, "package_download_url", "url", "package_url",
+                                  out->package_url, sizeof(out->package_url));
+    read_optional_raw_json_string(json, "package_file_name", "fn", NULL,
+                                  out->package_file_name, sizeof(out->package_file_name));
+    read_optional_raw_json_string(json, "package_checksum", "sum", "checksum",
+                                  out->package_sha256_hex, sizeof(out->package_sha256_hex));
+    read_optional_raw_json_string(json, "package_format", "fmt", NULL,
+                                  out->package_format, sizeof(out->package_format));
+    read_optional_raw_json_string(json, "package_etag", "etag", NULL,
+                                  out->package_etag, sizeof(out->package_etag));
+    if (out->package_format[0] == '\0') {
+        (void)snprintf(out->package_format, sizeof(out->package_format), "raw-bin");
+    }
+    if (out->release_code[0] != '\0') {
+        (void)snprintf(out->target_version, sizeof(out->target_version), "%s", out->release_code);
+    }
+
+    if (proto_json_get_u32(json, "package_size_bytes", &size_bytes) != 0 &&
+        proto_json_get_u32(json, "package_size", &size_bytes) != 0 &&
+        proto_json_get_u32(json, "sz", &size_bytes) != 0) {
+        size_bytes = 0U;
+    }
+    out->package_size = size_bytes;
+
+    if (proto_json_get_bool(json, "force_upgrade", &bool_value) == 0) {
+        out->force_upgrade = (bool_value != 0U);
+    }
+    if (proto_json_get_bool(json, "allow_running_upgrade", &bool_value) == 0) {
+        out->allow_running_upgrade = (bool_value != 0U);
+    }
+    if (proto_json_get_bool(json, "auto_commit", &bool_value) == 0) {
+        out->auto_commit = (bool_value != 0U);
+    }
+
+    if (out->upgrade_ticket[0] == '\0' ||
+        out->release_code[0] == '\0' ||
+        out->package_url[0] == '\0' ||
+        out->package_sha256_hex[0] == '\0' ||
+        out->package_etag[0] == '\0' ||
+        out->package_size == 0U) {
+        return -1;
+    }
+    return 0;
+}
+
+static int handle_upgrade_prepare_request(char *reply, size_t reply_cap,
+                                          const char *corr, const char *session_ref,
+                                          const char *scope, const char *action,
+                                          const ota_prepare_payload_t *prepare_in)
+{
+    ota_upgrade_status_t status;
+    ota_upgrade_status_t reject_status;
+    ota_state_t duplicate_state = OTA_STATE_IDLE;
+    const ota_upgrade_capability_t *cap = proto_ota_get_capability();
+    ota_prepare_payload_t prepare;
+    char extra[160];
+    int result;
+
+    if (reply == NULL || prepare_in == NULL) {
+        return -1;
+    }
+    if (cap == NULL || !cap->ota_supported) {
+        return build_action_nack(reply, reply_cap, corr, session_ref,
+                                 scope, action, "controller",
+                                 "MODULE_NOT_ENABLED", "ota transport not ready");
+    }
+
+    memset(&prepare, 0, sizeof(prepare));
+    memcpy(&prepare, prepare_in, sizeof(prepare));
+    result = proto_ota_execute_action(OTA_ACTION_PREPARE, &prepare);
+    if (result == -5 && proto_ota_is_prepare_duplicate_accepted(&prepare, &duplicate_state)) {
+        result = 1;
+    }
+    if (result == 0) {
+        memset(&status, 0, sizeof(status));
+        if (proto_ota_query_upgrade_status(&status) != 0 || status.ota_state != OTA_STATE_READY_TO_DOWNLOAD) {
+            result = -1;
+        }
+    }
+    if (result < 0) {
+        memset(&reject_status, 0, sizeof(reject_status));
+        if (proto_ota_query_upgrade_status(&reject_status) != 0) {
+            memset(&reject_status, 0, sizeof(reject_status));
+        }
+        return build_action_nack(reply, reply_cap, corr, session_ref,
+                                 scope, action, "controller",
+                                 map_ota_reject_code(result, &reject_status),
+                                 map_ota_reject_message(result, &reject_status));
+    }
+
+    if (result > 0) {
+        (void)snprintf(extra, sizeof(extra),
+                       "\"ut\":\"%s\",\"stg\":\"idempotent_replay\",\"ota_state\":\"%s\"",
+                       prepare.upgrade_ticket,
+                       map_ota_idempotent_stage(duplicate_state));
+    } else {
+        (void)snprintf(extra, sizeof(extra),
+                       "\"ut\":\"%s\",\"stg\":\"accepted\"",
+                       prepare.upgrade_ticket);
+    }
+    if (result == 0) {
+        ota_start_request_after_ack();
+    }
+    return build_action_ack(reply, reply_cap, corr, session_ref, scope, action, "controller", extra);
+}
+
+static const char *map_ota_reject_code(int result, const ota_upgrade_status_t *status)
 {
     switch (result) {
     case -1:
+        if (status != NULL && status->last_error_code != 0) {
+            return "DEVICE_BUSY";
+        }
         return "PARAM_INVALID";
     case -2:
         return "DEVICE_BUSY";
@@ -352,43 +628,145 @@ static const char *map_ota_reject_code(int result)
     }
 }
 
-static const char *map_ota_reject_message(int result)
+static const char *map_ota_reject_message(int result, const ota_upgrade_status_t *status)
 {
     switch (result) {
     case -1:
+        if (status != NULL && status->last_error_message[0] != '\0') {
+            return status->last_error_message;
+        }
         return "upgrade rejected";
     case -2:
+        if (status != NULL && status->last_error_message[0] != '\0') {
+            return status->last_error_message;
+        }
         return "upgrade already in progress";
     case -3:
+        if (status != NULL && status->last_error_message[0] != '\0') {
+            return status->last_error_message;
+        }
         return "upgrade port unavailable";
     case -4:
+        if (status != NULL && status->last_error_message[0] != '\0') {
+            return status->last_error_message;
+        }
         return "rollback unsupported";
     case -5:
         return "duplicate upgrade token";
     default:
+        if (status != NULL && status->last_error_message[0] != '\0') {
+            return status->last_error_message;
+        }
         return "upgrade rejected";
     }
 }
 
 static const char *map_ota_idempotent_stage(ota_state_t state)
 {
+    return proto_ota_stage_name(state, OTA_LAST_RESULT_NONE);
+}
+
+static uint8_t ota_state_blocks_remote_reboot(ota_state_t state)
+{
     switch (state) {
+    case OTA_STATE_PRECHECKING:
+    case OTA_STATE_READY_TO_DOWNLOAD:
     case OTA_STATE_DOWNLOADING:
-        return "downloading";
     case OTA_STATE_DOWNLOADED:
-        return "downloaded";
     case OTA_STATE_VERIFYING:
-        return "verifying";
     case OTA_STATE_VERIFIED:
-        return "verified";
     case OTA_STATE_WRITING:
-        return "writing";
     case OTA_STATE_READY_TO_SWITCH:
-        return "ready_to_switch";
     case OTA_STATE_SWITCHING:
-        return "switching";
+    case OTA_STATE_ROLLING_BACK:
+        return 1U;
     default:
-        return "accepted";
+        return 0U;
+    }
+}
+
+static void remote_reboot_request_after_ack(void)
+{
+    s_remote_reboot_pending_ack = 1U;
+    s_remote_reboot_armed = 0U;
+    s_remote_reboot_due_ms = 0U;
+}
+
+static void ota_start_request_after_ack(void)
+{
+    s_ota_start_pending_ack = 1U;
+    s_ota_start_armed = 0U;
+    s_ota_start_due_ms = 0U;
+}
+
+void proto_execute_action_on_reply_send_result(int send_rc, uint32_t monotonic_ms)
+{
+    char line[128];
+
+    if (s_remote_reboot_pending_ack != 0U) {
+        s_remote_reboot_pending_ack = 0U;
+        if (send_rc < 0) {
+            s_remote_reboot_armed = 0U;
+            s_remote_reboot_due_ms = 0U;
+            bsp_debug_log("[PROTO] remote reboot cancelled: ACK send failed\r\n");
+        } else {
+            s_remote_reboot_armed = 1U;
+            s_remote_reboot_due_ms = monotonic_ms + REMOTE_REBOOT_DELAY_MS;
+            (void)snprintf(line, sizeof(line),
+                           "[PROTO] remote reboot armed delay=%lu ms\r\n",
+                           (unsigned long)REMOTE_REBOOT_DELAY_MS);
+            bsp_debug_log(line);
+        }
+    }
+    if (s_ota_start_pending_ack != 0U) {
+        s_ota_start_pending_ack = 0U;
+        if (send_rc < 0) {
+            s_ota_start_armed = 0U;
+            s_ota_start_due_ms = 0U;
+            bsp_debug_log("[PROTO] OTA start cancelled: ACK send failed\r\n");
+        } else {
+            s_ota_start_armed = 1U;
+            s_ota_start_due_ms = monotonic_ms + OTA_START_AFTER_ACK_MS;
+            (void)snprintf(line, sizeof(line),
+                           "[PROTO] OTA start armed delay=%lu ms\r\n",
+                           (unsigned long)OTA_START_AFTER_ACK_MS);
+            bsp_debug_log(line);
+        }
+    }
+}
+
+void proto_execute_action_poll(uint32_t monotonic_ms)
+{
+    const ota_port_t *ota_port;
+
+    if (s_ota_start_armed != 0U) {
+        if ((int32_t)(monotonic_ms - s_ota_start_due_ms) >= 0) {
+            s_ota_start_armed = 0U;
+            s_ota_start_due_ms = 0U;
+            if (proto_ota_execute_action(OTA_ACTION_START, NULL) != 0) {
+                bsp_debug_log("[PROTO] deferred OTA start failed\r\n");
+            } else {
+                bsp_debug_log("[PROTO] deferred OTA start launched\r\n");
+            }
+        }
+    }
+
+    if (s_remote_reboot_armed == 0U) {
+        return;
+    }
+    if ((int32_t)(monotonic_ms - s_remote_reboot_due_ms) < 0) {
+        return;
+    }
+
+    s_remote_reboot_armed = 0U;
+    s_remote_reboot_due_ms = 0U;
+    ota_port = ota_port_board();
+    if (ota_port == NULL || ota_port->reboot_mcu == NULL) {
+        bsp_debug_log("[PROTO] remote reboot skipped: reboot port unavailable\r\n");
+        return;
+    }
+    if (ota_port->reboot_mcu(ota_port->user) != 0) {
+        bsp_debug_log("[PROTO] remote reboot failed: reboot port returned\r\n");
     }
 }
 
@@ -398,14 +776,17 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
     cJSON *payload = NULL;
     cJSON *params = NULL;
     const device_config_t *cfg = NULL;
+    const runtime_state_t *rs = NULL;
     char corr[48];
     char session_ref[64];
     char scope[16];
     char action[16];
     char target[32];
     char extra[160];
+    char repaired_json[2049];
     char *params_json = NULL;
     int result;
+    size_t repaired_len = 0U;
 
     (void)json_len;
 
@@ -421,7 +802,46 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
     extra[0] = '\0';
 
     root = cJSON_ParseWithLength(json, json_len);
+    if ((root == NULL || !cJSON_IsObject(root)) && json_len + 1U <= sizeof(repaired_json)) {
+        if (root != NULL) {
+            cJSON_Delete(root);
+            root = NULL;
+        }
+        repaired_len = proto_json_repair_duplicate_separators(json, json_len,
+                                                              repaired_json, sizeof(repaired_json));
+        if (repaired_len > 0U) {
+            root = cJSON_ParseWithLength(repaired_json, repaired_len);
+            if (root != NULL && cJSON_IsObject(root)) {
+                bsp_debug_log("[PROTO] EX repaired duplicate separators in inbound json\r\n");
+            }
+        }
+    }
     if (root == NULL || !cJSON_IsObject(root)) {
+        ota_prepare_payload_t tolerant_prepare;
+
+        read_optional_raw_json_string(json, "c", NULL, NULL, corr, sizeof(corr));
+        read_optional_raw_json_string(json, "r", NULL, NULL, session_ref, sizeof(session_ref));
+        read_optional_raw_json_string(json, "sc", "scope", NULL, scope, sizeof(scope));
+        read_optional_raw_json_string(json, "ac", "action_code", NULL, action, sizeof(action));
+        read_optional_raw_json_string(json, "tr", "target_ref", NULL, target, sizeof(target));
+        {
+            static const char *const s_scope_codes[] = { "cm", "common", "wf", "md" };
+            static const char *const s_action_codes[] = {
+                "ppu", "rbt", "reboot_device", "upg", "upgrade_firmware",
+                "pas", "res", "spu", "tpu", "ovl", "cvl"
+            };
+            normalize_known_short_code(scope, sizeof(scope), "scope",
+                                       s_scope_codes, sizeof(s_scope_codes) / sizeof(s_scope_codes[0]));
+            normalize_known_short_code(action, sizeof(action), "action",
+                                       s_action_codes, sizeof(s_action_codes) / sizeof(s_action_codes[0]));
+        }
+        if ((strcmp(scope, "cm") == 0 || strcmp(scope, "common") == 0) &&
+            strcmp(action, "upg") == 0 &&
+            parse_upgrade_prepare_payload_tolerant(json, &tolerant_prepare) == 0) {
+            bsp_debug_log("[PROTO] EX tolerant OTA fallback engaged\r\n");
+            return handle_upgrade_prepare_request(reply, reply_cap, corr, session_ref,
+                                                  scope, action, &tolerant_prepare);
+        }
         if (root != NULL) {
             cJSON_Delete(root);
         }
@@ -440,6 +860,17 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
     read_optional_string_alias(payload, "sc", "scope", scope, sizeof(scope));
     read_optional_string_alias(payload, "ac", "action_code", action, sizeof(action));
     read_optional_string_alias(payload, "tr", "target_ref", target, sizeof(target));
+    {
+        static const char *const s_scope_codes[] = { "cm", "common", "wf", "md" };
+        static const char *const s_action_codes[] = {
+            "ppu", "rbt", "reboot_device", "upg", "upgrade_firmware",
+            "pas", "res", "spu", "tpu", "ovl", "cvl"
+        };
+        normalize_known_short_code(scope, sizeof(scope), "scope",
+                                   s_scope_codes, sizeof(s_scope_codes) / sizeof(s_scope_codes[0]));
+        normalize_known_short_code(action, sizeof(action), "action",
+                                   s_action_codes, sizeof(s_action_codes) / sizeof(s_action_codes[0]));
+    }
     params = cJSON_GetObjectItemCaseSensitive(payload, "pm");
     if (params == NULL) {
         params = cJSON_GetObjectItemCaseSensitive(payload, "params");
@@ -453,6 +884,7 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
         return build_action_nack(reply, reply_cap, corr, session_ref, scope, action, target, "PARAM_INVALID", "missing sc or ac");
     }
     cfg = config_store_active();
+    rs = runtime_state_get();
     if (params != NULL) {
         params_json = cJSON_PrintUnformatted(params);
     }
@@ -472,75 +904,106 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
         }
         cJSON_Delete(root);
         if (result != 0) {
-            return build_action_nack(reply, reply_cap, corr, session_ref,
-                                     scope, action, "controller", map_safety_reject_code(result), safety_flow_error_message(result));
+            return finalize_action_reply(reply, reply_cap, corr, scope, action, "controller",
+                                         build_action_nack(reply, reply_cap, corr, session_ref,
+                                                           scope, action, "controller", map_safety_reject_code(result), safety_flow_error_message(result)));
         }
-        return build_action_ack(reply, reply_cap, corr, session_ref, scope, action, "controller", extra);
+        return finalize_action_reply(reply, reply_cap, corr, scope, action, "controller",
+                                     build_action_ack(reply, reply_cap, corr, session_ref, scope, action, "controller", extra));
+    }
+
+    if ((strcmp(scope, "cm") == 0 || strcmp(scope, "common") == 0) &&
+        (strcmp(action, "rbt") == 0 || strcmp(action, "reboot_device") == 0)) {
+        ota_upgrade_status_t status;
+        const ota_port_t *ota_port = ota_port_board();
+
+        if (require_target_or_empty(target, "controller") != 0) {
+            if (params_json != NULL) {
+                cJSON_free(params_json);
+            }
+            cJSON_Delete(root);
+            return finalize_action_reply(reply, reply_cap, corr, scope, action, target,
+                                         build_action_nack(reply, reply_cap, corr, session_ref, scope, action, target, "PARAM_INVALID", "tr must be controller"));
+        }
+        if (ota_port == NULL || ota_port->reboot_mcu == NULL) {
+            if (params_json != NULL) {
+                cJSON_free(params_json);
+            }
+            cJSON_Delete(root);
+            return finalize_action_reply(reply, reply_cap, corr, scope, action, "controller",
+                                         build_action_nack(reply, reply_cap, corr, session_ref,
+                                                           scope, action, "controller", "MODULE_NOT_ENABLED",
+                                                           "reboot port unavailable"));
+        }
+        memset(&status, 0, sizeof(status));
+        if (proto_ota_query_upgrade_status(&status) != 0) {
+            if (params_json != NULL) {
+                cJSON_free(params_json);
+            }
+            cJSON_Delete(root);
+            return finalize_action_reply(reply, reply_cap, corr, scope, action, "controller",
+                                         build_action_nack(reply, reply_cap, corr, session_ref,
+                                                           scope, action, "controller", "DEVICE_BUSY",
+                                                           "ota state unavailable"));
+        }
+        if (ota_state_blocks_remote_reboot(status.ota_state) != 0U) {
+            if (params_json != NULL) {
+                cJSON_free(params_json);
+            }
+            cJSON_Delete(root);
+            return finalize_action_reply(reply, reply_cap, corr, scope, action, "controller",
+                                         build_action_nack(reply, reply_cap, corr, session_ref,
+                                                           scope, action, "controller", "DEVICE_BUSY",
+                                                           "ota workflow active"));
+        }
+        if (rs != NULL &&
+            (rs->run_state == RUNTIME_RUN_STARTING ||
+             rs->run_state == RUNTIME_RUN_RUNNING ||
+             rs->run_state == RUNTIME_RUN_STOPPING)) {
+            if (params_json != NULL) {
+                cJSON_free(params_json);
+            }
+            cJSON_Delete(root);
+            return finalize_action_reply(reply, reply_cap, corr, scope, action, "controller",
+                                         build_action_nack(reply, reply_cap, corr, session_ref,
+                                                           scope, action, "controller", "DEVICE_BUSY",
+                                                           "irrigation session active"));
+        }
+        if (params_json != NULL) {
+            cJSON_free(params_json);
+        }
+        cJSON_Delete(root);
+        (void)snprintf(extra, sizeof(extra), "\"stg\":\"scheduled\"");
+        result = build_action_ack(reply, reply_cap, corr, session_ref, scope, action, "controller", extra);
+        if (result >= 0) {
+            remote_reboot_request_after_ack();
+        }
+        return finalize_action_reply(reply, reply_cap, corr, scope, action, "controller", result);
     }
 
     if ((strcmp(scope, "cm") == 0 || strcmp(scope, "common") == 0) &&
         strcmp(action, "upg") == 0) {
         ota_prepare_payload_t prepare;
-        ota_upgrade_status_t status;
-        ota_state_t duplicate_state = OTA_STATE_IDLE;
-        const ota_upgrade_capability_t *cap = proto_ota_get_capability();
         const cJSON *upgrade_payload = params != NULL ? params : payload;
-
-        if (cap == NULL || !cap->ota_supported) {
-            if (params_json != NULL) {
-                cJSON_free(params_json);
-            }
-            cJSON_Delete(root);
-            return build_action_nack(reply, reply_cap, corr, session_ref,
-                                     scope, action, "controller", "MODULE_NOT_ENABLED",
-                                     "ota transport not ready");
-        }
 
         if (parse_upgrade_prepare_payload(upgrade_payload, &prepare) != 0) {
             if (params_json != NULL) {
                 cJSON_free(params_json);
             }
             cJSON_Delete(root);
-            return build_action_nack(reply, reply_cap, corr, session_ref,
-                                     scope, action, "controller", "PARAM_INVALID",
-                                     "missing upgrade package fields");
+            return finalize_action_reply(reply, reply_cap, corr, scope, action, "controller",
+                                         build_action_nack(reply, reply_cap, corr, session_ref,
+                                                           scope, action, "controller", "PARAM_INVALID",
+                                                            "missing upgrade package fields"));
         }
 
-        result = proto_ota_execute_action(OTA_ACTION_PREPARE, &prepare);
-        if (result == -5 &&
-            proto_ota_is_prepare_duplicate_accepted(&prepare, &duplicate_state)) {
-            result = 1;
-        }
-        if (result == 0) {
-            memset(&status, 0, sizeof(status));
-            if (proto_ota_query_upgrade_status(&status) != 0 || status.ota_state != OTA_STATE_READY_TO_DOWNLOAD) {
-                result = -1;
-            }
-        }
-        if (result == 0) {
-            result = proto_ota_execute_action(OTA_ACTION_START, NULL);
-        }
         if (params_json != NULL) {
             cJSON_free(params_json);
         }
         cJSON_Delete(root);
-        if (result < 0) {
-            return build_action_nack(reply, reply_cap, corr, session_ref,
-                                     scope, action, "controller",
-                                     map_ota_reject_code(result),
-                                     map_ota_reject_message(result));
-        }
-        if (result > 0) {
-            (void)snprintf(extra, sizeof(extra),
-                           "\"ut\":\"%s\",\"stg\":\"idempotent_replay\",\"ota_state\":\"%s\"",
-                           prepare.upgrade_ticket,
-                           map_ota_idempotent_stage(duplicate_state));
-        } else {
-            (void)snprintf(extra, sizeof(extra),
-                           "\"ut\":\"%s\",\"stg\":\"command_acked\"",
-                           prepare.upgrade_ticket);
-        }
-        return build_action_ack(reply, reply_cap, corr, session_ref, scope, action, "controller", extra);
+        return finalize_action_reply(reply, reply_cap, corr, scope, action, "controller",
+                                     handle_upgrade_prepare_request(reply, reply_cap, corr, session_ref,
+                                                                    scope, action, &prepare));
     }
 
     if ((strcmp(scope, "wf") == 0 || strcmp(scope, "md") == 0) && strcmp(action, "pas") == 0) {
@@ -549,7 +1012,8 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
                 cJSON_free(params_json);
             }
             cJSON_Delete(root);
-            return build_action_nack(reply, reply_cap, corr, session_ref, scope, action, target, "PARAM_INVALID", "tr must be pump_1");
+            return finalize_action_reply(reply, reply_cap, corr, scope, action, target,
+                                         build_action_nack(reply, reply_cap, corr, session_ref, scope, action, target, "PARAM_INVALID", "tr must be pump_1"));
         }
         result = workflow_engine_request_pause_session();
         if (params_json != NULL) {
@@ -557,10 +1021,12 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
         }
         cJSON_Delete(root);
         if (result != WORKFLOW_REQ_OK) {
-            return build_action_nack(reply, reply_cap, corr, session_ref, scope, action, "pump_1", "DEVICE_BUSY",
-                                     workflow_control_error_message(result));
+            return finalize_action_reply(reply, reply_cap, corr, scope, action, "pump_1",
+                                         build_action_nack(reply, reply_cap, corr, session_ref, scope, action, "pump_1", "DEVICE_BUSY",
+                                                           workflow_control_error_message(result)));
         }
-        return build_action_ack(reply, reply_cap, corr, session_ref, scope, action, "pump_1", NULL);
+        return finalize_action_reply(reply, reply_cap, corr, scope, action, "pump_1",
+                                     build_action_ack(reply, reply_cap, corr, session_ref, scope, action, "pump_1", NULL));
     }
 
     if ((strcmp(scope, "wf") == 0 || strcmp(scope, "md") == 0) && strcmp(action, "res") == 0) {
@@ -569,7 +1035,8 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
                 cJSON_free(params_json);
             }
             cJSON_Delete(root);
-            return build_action_nack(reply, reply_cap, corr, session_ref, scope, action, target, "PARAM_INVALID", "tr must be pump_1");
+            return finalize_action_reply(reply, reply_cap, corr, scope, action, target,
+                                         build_action_nack(reply, reply_cap, corr, session_ref, scope, action, target, "PARAM_INVALID", "tr must be pump_1"));
         }
         result = workflow_engine_request_resume_session();
         if (params_json != NULL) {
@@ -577,10 +1044,12 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
         }
         cJSON_Delete(root);
         if (result != WORKFLOW_REQ_OK) {
-            return build_action_nack(reply, reply_cap, corr, session_ref, scope, action, "pump_1", "DEVICE_BUSY",
-                                     workflow_control_error_message(result));
+            return finalize_action_reply(reply, reply_cap, corr, scope, action, "pump_1",
+                                         build_action_nack(reply, reply_cap, corr, session_ref, scope, action, "pump_1", "DEVICE_BUSY",
+                                                           workflow_control_error_message(result)));
         }
-        return build_action_ack(reply, reply_cap, corr, session_ref, scope, action, "pump_1", NULL);
+        return finalize_action_reply(reply, reply_cap, corr, scope, action, "pump_1",
+                                     build_action_ack(reply, reply_cap, corr, session_ref, scope, action, "pump_1", NULL));
     }
 
     if (strcmp(scope, "md") == 0 && strcmp(action, "spu") == 0) {
@@ -589,7 +1058,8 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
                 cJSON_free(params_json);
             }
             cJSON_Delete(root);
-            return build_action_nack(reply, reply_cap, corr, session_ref, scope, action, target, "PARAM_INVALID", "tr must be pump_1");
+            return finalize_action_reply(reply, reply_cap, corr, scope, action, target,
+                                         build_action_nack(reply, reply_cap, corr, session_ref, scope, action, target, "PARAM_INVALID", "tr must be pump_1"));
         }
         result = safety_flow_execute_action("start_pump", params_json, extra, sizeof(extra));
         if (params_json != NULL) {
@@ -597,10 +1067,12 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
         }
         cJSON_Delete(root);
         if (result != 0) {
-            return build_action_nack(reply, reply_cap, corr, session_ref,
-                                     scope, action, "pump_1", map_safety_reject_code(result), safety_flow_error_message(result));
+            return finalize_action_reply(reply, reply_cap, corr, scope, action, "pump_1",
+                                         build_action_nack(reply, reply_cap, corr, session_ref,
+                                                           scope, action, "pump_1", map_safety_reject_code(result), safety_flow_error_message(result)));
         }
-        return build_action_ack(reply, reply_cap, corr, session_ref, scope, action, "pump_1", extra);
+        return finalize_action_reply(reply, reply_cap, corr, scope, action, "pump_1",
+                                     build_action_ack(reply, reply_cap, corr, session_ref, scope, action, "pump_1", extra));
     }
 
     if (strcmp(scope, "md") == 0 && strcmp(action, "tpu") == 0) {
@@ -609,7 +1081,8 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
                 cJSON_free(params_json);
             }
             cJSON_Delete(root);
-            return build_action_nack(reply, reply_cap, corr, session_ref, scope, action, target, "PARAM_INVALID", "tr must be pump_1");
+            return finalize_action_reply(reply, reply_cap, corr, scope, action, target,
+                                         build_action_nack(reply, reply_cap, corr, session_ref, scope, action, target, "PARAM_INVALID", "tr must be pump_1"));
         }
         result = safety_flow_execute_action("stop_pump", params_json, extra, sizeof(extra));
         if (params_json != NULL) {
@@ -617,10 +1090,12 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
         }
         cJSON_Delete(root);
         if (result != 0) {
-            return build_action_nack(reply, reply_cap, corr, session_ref,
-                                     scope, action, "pump_1", map_safety_reject_code(result), safety_flow_error_message(result));
+            return finalize_action_reply(reply, reply_cap, corr, scope, action, "pump_1",
+                                         build_action_nack(reply, reply_cap, corr, session_ref,
+                                                           scope, action, "pump_1", map_safety_reject_code(result), safety_flow_error_message(result)));
         }
-        return build_action_ack(reply, reply_cap, corr, session_ref, scope, action, "pump_1", extra);
+        return finalize_action_reply(reply, reply_cap, corr, scope, action, "pump_1",
+                                     build_action_ack(reply, reply_cap, corr, session_ref, scope, action, "pump_1", extra));
     }
 
     if (strcmp(scope, "md") == 0 && strcmp(action, "ovl") == 0) {
@@ -629,14 +1104,16 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
                 cJSON_free(params_json);
             }
             cJSON_Delete(root);
-            return build_action_nack(reply, reply_cap, corr, session_ref, scope, action, target, "PARAM_INVALID", "tr must be valve_1");
+            return finalize_action_reply(reply, reply_cap, corr, scope, action, target,
+                                         build_action_nack(reply, reply_cap, corr, session_ref, scope, action, target, "PARAM_INVALID", "tr must be valve_1"));
         }
         if (cfg == NULL || cfg->feature_modules.single_valve_control == 0U) {
             if (params_json != NULL) {
                 cJSON_free(params_json);
             }
             cJSON_Delete(root);
-            return build_action_nack(reply, reply_cap, corr, session_ref, scope, action, "valve_1", "MODULE_NOT_ENABLED", "valve module disabled");
+            return finalize_action_reply(reply, reply_cap, corr, scope, action, "valve_1",
+                                         build_action_nack(reply, reply_cap, corr, session_ref, scope, action, "valve_1", "MODULE_NOT_ENABLED", "valve module disabled"));
         }
         result = safety_flow_execute_action("open_valve", params_json, extra, sizeof(extra));
         if (params_json != NULL) {
@@ -644,10 +1121,12 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
         }
         cJSON_Delete(root);
         if (result != 0) {
-            return build_action_nack(reply, reply_cap, corr, session_ref,
-                                     scope, action, "valve_1", map_safety_reject_code(result), safety_flow_error_message(result));
+            return finalize_action_reply(reply, reply_cap, corr, scope, action, "valve_1",
+                                         build_action_nack(reply, reply_cap, corr, session_ref,
+                                                           scope, action, "valve_1", map_safety_reject_code(result), safety_flow_error_message(result)));
         }
-        return build_action_ack(reply, reply_cap, corr, session_ref, scope, action, "valve_1", extra);
+        return finalize_action_reply(reply, reply_cap, corr, scope, action, "valve_1",
+                                     build_action_ack(reply, reply_cap, corr, session_ref, scope, action, "valve_1", extra));
     }
 
     if (strcmp(scope, "md") == 0 && strcmp(action, "cvl") == 0) {
@@ -656,14 +1135,16 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
                 cJSON_free(params_json);
             }
             cJSON_Delete(root);
-            return build_action_nack(reply, reply_cap, corr, session_ref, scope, action, target, "PARAM_INVALID", "tr must be valve_1");
+            return finalize_action_reply(reply, reply_cap, corr, scope, action, target,
+                                         build_action_nack(reply, reply_cap, corr, session_ref, scope, action, target, "PARAM_INVALID", "tr must be valve_1"));
         }
         if (cfg == NULL || cfg->feature_modules.single_valve_control == 0U) {
             if (params_json != NULL) {
                 cJSON_free(params_json);
             }
             cJSON_Delete(root);
-            return build_action_nack(reply, reply_cap, corr, session_ref, scope, action, "valve_1", "MODULE_NOT_ENABLED", "valve module disabled");
+            return finalize_action_reply(reply, reply_cap, corr, scope, action, "valve_1",
+                                         build_action_nack(reply, reply_cap, corr, session_ref, scope, action, "valve_1", "MODULE_NOT_ENABLED", "valve module disabled"));
         }
         result = safety_flow_execute_action("close_valve", params_json, extra, sizeof(extra));
         if (params_json != NULL) {
@@ -671,15 +1152,18 @@ int proto_execute_action_handle(const char *json, size_t json_len, char *reply, 
         }
         cJSON_Delete(root);
         if (result != 0) {
-            return build_action_nack(reply, reply_cap, corr, session_ref,
-                                     scope, action, "valve_1", map_safety_reject_code(result), safety_flow_error_message(result));
+            return finalize_action_reply(reply, reply_cap, corr, scope, action, "valve_1",
+                                         build_action_nack(reply, reply_cap, corr, session_ref,
+                                                           scope, action, "valve_1", map_safety_reject_code(result), safety_flow_error_message(result)));
         }
-        return build_action_ack(reply, reply_cap, corr, session_ref, scope, action, "valve_1", extra);
+        return finalize_action_reply(reply, reply_cap, corr, scope, action, "valve_1",
+                                     build_action_ack(reply, reply_cap, corr, session_ref, scope, action, "valve_1", extra));
     }
 
     if (params_json != NULL) {
         cJSON_free(params_json);
     }
     cJSON_Delete(root);
-    return build_action_nack(reply, reply_cap, corr, session_ref, scope, action, target, "UNSUPPORTED_COMMAND", "unsupported action");
+    return finalize_action_reply(reply, reply_cap, corr, scope, action, target,
+                                 build_action_nack(reply, reply_cap, corr, session_ref, scope, action, target, "UNSUPPORTED_COMMAND", "unsupported action"));
 }

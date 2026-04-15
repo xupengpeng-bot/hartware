@@ -1,6 +1,7 @@
 #include "proto_sync_config.h"
 
 #include "config_store.h"
+#include "proto_codec_json.h"
 #include "storage_config.h"
 
 #include "bsp_uart.h"
@@ -220,8 +221,11 @@ static void parse_runtime_rules(const cJSON *obj, runtime_rules_t *rules)
     if (json_read_u32(obj, "heartbeat_interval_sec", &value) == 0) {
         rules->heartbeat_interval_sec = (uint16_t)(value > 0xFFFFU ? 0xFFFFU : value);
     }
-    if (json_read_u32(obj, "snapshot_interval_sec", &value) == 0) {
-        rules->snapshot_interval_sec = (uint16_t)(value > 0xFFFFU ? 0xFFFFU : value);
+    if (json_read_u32(obj, "snapshot_idle_interval_sec", &value) == 0) {
+        rules->snapshot_idle_interval_sec = (uint16_t)(value > 0xFFFFU ? 0xFFFFU : value);
+    }
+    if (json_read_u32(obj, "snapshot_running_interval_sec", &value) == 0) {
+        rules->snapshot_running_interval_sec = (uint16_t)(value > 0xFFFFU ? 0xFFFFU : value);
     }
     if (json_read_u32(obj, "cloud_auth_timeout_ms", &value) == 0) {
         rules->cloud_auth_timeout_ms = value;
@@ -327,11 +331,13 @@ int proto_sync_config_apply(const char *json, size_t json_len, char *ack_json, s
 {
     cJSON *root = NULL;
     cJSON *payload = NULL;
+    char repaired_json[2049];
     const cJSON *item = NULL;
     device_config_t *cfg;
     const device_config_t *prev;
     uint32_t config_version = 0U;
     int rc;
+    size_t repaired_len = 0U;
 
     (void)json_len;
 
@@ -340,6 +346,20 @@ int proto_sync_config_apply(const char *json, size_t json_len, char *ack_json, s
     }
 
     root = cJSON_ParseWithLength(json, json_len);
+    if ((root == NULL || !cJSON_IsObject(root)) && json_len + 1U <= sizeof(repaired_json)) {
+        if (root != NULL) {
+            cJSON_Delete(root);
+            root = NULL;
+        }
+        repaired_len = proto_json_repair_duplicate_separators(json, json_len,
+                                                              repaired_json, sizeof(repaired_json));
+        if (repaired_len > 0U) {
+            root = cJSON_ParseWithLength(repaired_json, repaired_len);
+            if (root != NULL && cJSON_IsObject(root)) {
+                bsp_debug_log("[PROTO] SC repaired duplicate separators in inbound json\r\n");
+            }
+        }
+    }
     if (root == NULL || !cJSON_IsObject(root)) {
         if (root != NULL) {
             cJSON_Delete(root);

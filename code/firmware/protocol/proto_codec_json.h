@@ -30,6 +30,7 @@ int proto_json_get_float(const char *json, const char *key, float *out);
 int proto_json_get_bool(const char *json, const char *key, uint8_t *out);
 /** Reads 0/1 after key. */
 int proto_json_get_u8_01(const char *json, const char *key, uint8_t *out);
+size_t proto_json_repair_duplicate_separators(const char *json, size_t json_len, char *out, size_t out_cap);
 
 const char *proto_map_reject_short(const char *value);
 const char *proto_map_module_short(const char *value);

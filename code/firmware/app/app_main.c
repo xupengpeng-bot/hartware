@@ -104,6 +104,81 @@ static void ota_report_fill_meta(ota_report_pending_t *report)
     }
 }
 
+static const char *ota_report_reason_code_from_error(int32_t error_code)
+{
+    switch (error_code) {
+    case OTA_ERRC_MANIFEST_MISSING:
+        return "manifest_missing";
+    case OTA_ERRC_HTTP_DOWNLOAD:
+        return "http_failed";
+    case OTA_ERRC_FLASH_WRITE:
+        return "flash_write_failed";
+    case OTA_ERRC_SIZE_MISMATCH:
+        return "size_mismatch";
+    case OTA_ERRC_SHA_PORT_UNAVAILABLE:
+        return "sha_port_unavailable";
+    case OTA_ERRC_SHA_FINAL:
+        return "sha_final_failed";
+    case OTA_ERRC_SHA256_MISMATCH:
+        return "sha256_mismatch";
+    case OTA_ERRC_SWITCH_MANIFEST_MISSING:
+        return "switch_manifest_missing";
+    case OTA_ERRC_BOOT_CONTROL_WRITE:
+        return "boot_control_write_failed";
+    case OTA_ERRC_REBOOT_RETURNED:
+        return "reboot_not_triggered";
+    case OTA_ERRC_MANIFEST_SAVE_FAILED:
+        return "manifest_save_failed";
+    case OTA_ERRC_FLASH_ERASE:
+        return "flash_erase_failed";
+    case OTA_ERRC_HTTP_CONTENT_TYPE_INVALID:
+        return "content_type_invalid";
+    case OTA_ERRC_HTTP_ACCEPT_RANGES_INVALID:
+        return "accept_ranges_invalid";
+    case OTA_ERRC_HTTP_ETAG_MISMATCH:
+        return "etag_mismatch";
+    case OTA_ERRC_HTTP_LENGTH_MISMATCH:
+        return "content_length_mismatch";
+    default:
+        return "exec_failed";
+    }
+}
+
+static void ota_report_fill_failure_details(ota_report_pending_t *report, int32_t error_code)
+{
+    ota_upgrade_status_t status;
+
+    if (report == NULL) {
+        return;
+    }
+    memset(&status, 0, sizeof(status));
+    ota_copy_text(report->reason_code, sizeof(report->reason_code),
+                  ota_report_reason_code_from_error(error_code));
+    if (proto_ota_query_upgrade_status(&status) == 0) {
+        if (status.download_progress_pct > report->progress_percent) {
+            report->progress_percent = status.download_progress_pct;
+        }
+        if (status.ota_state == OTA_STATE_READY_TO_SWITCH ||
+            status.ota_state == OTA_STATE_SWITCHING ||
+            error_code == OTA_ERRC_SHA_PORT_UNAVAILABLE ||
+            error_code == OTA_ERRC_SHA_FINAL ||
+            error_code == OTA_ERRC_SHA256_MISMATCH ||
+            error_code == OTA_ERRC_SWITCH_MANIFEST_MISSING ||
+            error_code == OTA_ERRC_BOOT_CONTROL_WRITE ||
+            error_code == OTA_ERRC_REBOOT_RETURNED) {
+            report->progress_percent = 100U;
+        }
+        if (status.last_error_message[0] != '\0') {
+            ota_copy_text(report->message, sizeof(report->message),
+                          status.last_error_message);
+            return;
+        }
+    }
+    (void)snprintf(report->message, sizeof(report->message),
+                   "upgrade failed(%ld)",
+                   (long)error_code);
+}
+
 static void ota_report_queue_and_try_send(const ota_report_pending_t *report)
 {
     int rc;
@@ -157,39 +232,58 @@ static void cb_ota_event(const proto_ota_event_t *event, void *user)
 
     switch (event->code) {
     case OTA_EVENT_OTA_COMMAND_ACKED:
-        ota_copy_text(report.stage, sizeof(report.stage), "command_acked");
+        ota_copy_text(report.stage, sizeof(report.stage), "accepted");
         ota_copy_text(report.result, sizeof(report.result), "accepted");
         report.progress_percent = 0U;
+        ota_copy_text(report.reason_code, sizeof(report.reason_code), "accepted");
+        ota_copy_text(report.message, sizeof(report.message), "upgrade command accepted");
         break;
     case OTA_EVENT_OTA_DOWNLOAD_PROGRESS:
         ota_copy_text(report.stage, sizeof(report.stage), "downloading");
         ota_copy_text(report.result, sizeof(report.result), "running");
         report.progress_percent = event->u.download_progress.download_progress_pct;
         break;
-    case OTA_EVENT_OTA_WRITE_COMPLETED:
-    case OTA_EVENT_OTA_VERIFY_PASSED:
-        ota_copy_text(report.stage, sizeof(report.stage), "installing");
+    case OTA_EVENT_OTA_DOWNLOAD_COMPLETED:
+        ota_copy_text(report.stage, sizeof(report.stage), "downloaded");
         ota_copy_text(report.result, sizeof(report.result), "running");
         report.progress_percent = 100U;
+        ota_copy_text(report.reason_code, sizeof(report.reason_code), "download_complete");
+        ota_copy_text(report.message, sizeof(report.message), "download complete");
+        break;
+    case OTA_EVENT_OTA_WRITE_COMPLETED:
+        ota_copy_text(report.stage, sizeof(report.stage), "staged");
+        ota_copy_text(report.result, sizeof(report.result), "running");
+        report.progress_percent = 100U;
+        ota_copy_text(report.reason_code, sizeof(report.reason_code), "staging_write_complete");
+        ota_copy_text(report.message, sizeof(report.message), "image written to staging");
+        break;
+    case OTA_EVENT_OTA_VERIFY_PASSED:
+        ota_copy_text(report.stage, sizeof(report.stage), "verified");
+        ota_copy_text(report.result, sizeof(report.result), "running");
+        report.progress_percent = 100U;
+        ota_copy_text(report.reason_code, sizeof(report.reason_code), "sha256_verified");
+        ota_copy_text(report.message, sizeof(report.message), "sha256 verified");
         break;
     case OTA_EVENT_OTA_SWITCH_SCHEDULED:
-        ota_copy_text(report.stage, sizeof(report.stage), "rebooting");
+        ota_copy_text(report.stage, sizeof(report.stage), "scheduled");
         ota_copy_text(report.result, sizeof(report.result), "running");
         report.progress_percent = 100U;
+        ota_copy_text(report.reason_code, sizeof(report.reason_code), "boot_control_scheduled");
+        ota_copy_text(report.message, sizeof(report.message), "boot control scheduled");
         break;
     case OTA_EVENT_OTA_UPGRADE_SUCCEEDED:
         net_connectivity_resume_after_ota();
-        ota_copy_text(report.stage, sizeof(report.stage), "succeeded");
+        ota_copy_text(report.stage, sizeof(report.stage), "boot_confirmed");
         ota_copy_text(report.result, sizeof(report.result), "succeeded");
         report.progress_percent = 100U;
+        ota_copy_text(report.reason_code, sizeof(report.reason_code), "boot_confirmed");
+        ota_copy_text(report.message, sizeof(report.message), "new firmware boot confirmed");
         break;
     case OTA_EVENT_OTA_UPGRADE_FAILED:
         net_connectivity_resume_after_ota();
         ota_copy_text(report.stage, sizeof(report.stage), "failed");
         ota_copy_text(report.result, sizeof(report.result), "failed");
-        ota_copy_text(report.reason_code, sizeof(report.reason_code), "exec_failed");
-        (void)snprintf(report.message, sizeof(report.message), "upgrade failed(%ld)",
-                       (long)event->u.error_code);
+        ota_report_fill_failure_details(&report, event->u.error_code);
         break;
     default:
         return;
@@ -410,6 +504,7 @@ void app_main_loop_iteration(uint32_t monotonic_ms)
     app_health_poll();
     app_scheduler_tick(monotonic_ms);
     net_connectivity_poll(monotonic_ms);
+    proto_execute_action_poll(monotonic_ms);
     bsp_status_led_poll(monotonic_ms);
     proto_ota_poll();
     ota_report_try_emit_pending();

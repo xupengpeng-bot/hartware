@@ -2,6 +2,7 @@
 
 #include "common_status.h"
 #include "config_store.h"
+#include "proto_capability.h"
 #include "proto_codec_json.h"
 #include "proto_envelope.h"
 #include "runtime_state.h"
@@ -109,6 +110,8 @@ static int heartbeat_build_common(char *buf, size_t cap, uint32_t seq)
 {
     json_buf_t jb;
     const common_status_t *cs = common_status_get();
+    const device_config_t *cfg = config_store_active();
+    proto_capability_info_t capability;
     const runtime_state_t *rs = runtime_state_get();
     uint8_t signal_valid;
     uint8_t battery_v_valid;
@@ -116,7 +119,10 @@ static int heartbeat_build_common(char *buf, size_t cap, uint32_t seq)
     uint8_t battery_soc_valid;
     uint8_t first = 1U;
 
-    if (buf == NULL || cap < 512U || rs == NULL || cs == NULL) {
+    if (buf == NULL || cap < 512U || rs == NULL || cs == NULL || cfg == NULL) {
+        return -1;
+    }
+    if (proto_capability_describe(cfg, &cfg->feature_modules, &capability) != 0) {
         return -1;
     }
 
@@ -142,6 +148,8 @@ static int heartbeat_build_common(char *buf, size_t cap, uint32_t seq)
                                                                   rs->ready ? 1U : 0U)) != 0 ||
         append_optional_separator(&jb, &first) != 0 ||
         append_u32_field(&jb, "cv", rs->config_version) != 0 ||
+        append_optional_separator(&jb, &first) != 0 ||
+        append_string_field(&jb, "cap_hash", capability.capability_hash) != 0 ||
         append_optional_separator(&jb, &first) != 0 ||
         append_string_field(&jb, "pm", proto_map_power_mode_short(runtime_state_power_name(rs->power_state))) != 0) {
         return -3;

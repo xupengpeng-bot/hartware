@@ -87,7 +87,8 @@ typedef struct {
     uint8_t  vitals_csq_delta;
     /** |SOC 变化| ≥ 此值则立即补发 vitals；0 关闭。 */
     uint8_t  vitals_soc_delta;
-    uint16_t snapshot_interval_sec;
+    uint16_t snapshot_idle_interval_sec;
+    uint16_t snapshot_running_interval_sec;
     uint16_t runtime_tick_interval_sec;
     uint16_t ready_grace_sec;
     uint16_t valve_action_timeout_sec;

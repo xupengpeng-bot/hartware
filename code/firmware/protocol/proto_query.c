@@ -186,17 +186,299 @@ static const char *meter_protocol_value(void)
     return module_meter_source_name();
 }
 
-static int build_query_result(char *reply, size_t reply_cap,
-                              const char *corr, const char *session_ref,
-                              cJSON *out_payload)
+static void log_query_result_failure(const char *qcode, const char *stage, int rc, size_t reply_cap)
 {
+    char line[192];
+
+    (void)snprintf(line, sizeof(line),
+                   "[PROTO] QS build failed qc=%s stage=%s rc=%ld cap=%lu\r\n",
+                   qcode != NULL ? qcode : "",
+                   stage != NULL ? stage : "unknown",
+                   (long)rc,
+                   (unsigned long)reply_cap);
+    bsp_debug_log(line);
+}
+
+static int append_query_sep(json_buf_t *jb, uint8_t *first)
+{
+    if (jb == NULL || first == NULL) {
+        return -1;
+    }
+    if (*first != 0U) {
+        *first = 0U;
+        return 0;
+    }
+    return json_buf_append(jb, ",");
+}
+
+static int append_query_string_field(json_buf_t *jb, uint8_t *first, const char *key, const char *value)
+{
+    if (jb == NULL || first == NULL || key == NULL || value == NULL) {
+        return -1;
+    }
+    if (append_query_sep(jb, first) != 0 ||
+        json_buf_append(jb, "\"") != 0 ||
+        json_buf_append(jb, key) != 0 ||
+        json_buf_append(jb, "\":\"") != 0 ||
+        json_escape_append(jb, value) != 0 ||
+        json_buf_append(jb, "\"") != 0) {
+        return -1;
+    }
+    return 0;
+}
+
+static int append_query_u32_field(json_buf_t *jb, uint8_t *first, const char *key, uint32_t value)
+{
+    if (jb == NULL || first == NULL || key == NULL) {
+        return -1;
+    }
+    if (append_query_sep(jb, first) != 0 ||
+        json_buf_append(jb, "\"") != 0 ||
+        json_buf_append(jb, key) != 0 ||
+        json_buf_append_fmt(jb, "\":%lu", (unsigned long)value) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
+static int append_query_i32_field(json_buf_t *jb, uint8_t *first, const char *key, int32_t value)
+{
+    if (jb == NULL || first == NULL || key == NULL) {
+        return -1;
+    }
+    if (append_query_sep(jb, first) != 0 ||
+        json_buf_append(jb, "\"") != 0 ||
+        json_buf_append(jb, key) != 0 ||
+        json_buf_append_fmt(jb, "\":%ld", (long)value) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
+static int append_query_fixed_field(json_buf_t *jb, uint8_t *first, const char *key, float value, uint8_t frac_digits)
+{
+    if (jb == NULL || first == NULL || key == NULL) {
+        return -1;
+    }
+    if (append_query_sep(jb, first) != 0 ||
+        json_buf_append(jb, "\"") != 0 ||
+        json_buf_append(jb, key) != 0 ||
+        json_buf_append(jb, "\":") != 0 ||
+        json_buf_append_fixed(jb, value, frac_digits) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
+static int append_query_string_if_nonempty(json_buf_t *jb, uint8_t *first, const char *key, const char *value)
+{
+    if (value == NULL || value[0] == '\0') {
+        return 0;
+    }
+    return append_query_string_field(jb, first, key, value);
+}
+
+static int build_query_result_workflow_state(char *reply, size_t reply_cap, const char *corr,
+                                             const char *session_ref, const char *scope, const char *qcode,
+                                             const runtime_state_t *rs)
+{
+    json_buf_t jb;
+    uint8_t first = 1U;
     int rc;
 
-    rc = proto_json_build_message(reply, reply_cap, PROTO_MSG_QUERY_RESULT, 0U,
-                                  corr[0] != '\0' ? corr : NULL,
-                                  resolve_reply_session_ref(session_ref),
-                                  out_payload);
-    return rc;
+    json_buf_init(&jb, reply, reply_cap);
+    rc = proto_envelope_append_payload_prefix(&jb, PROTO_MSG_QUERY_RESULT, 0U,
+                                              corr[0] != '\0' ? corr : NULL,
+                                              resolve_reply_session_ref(session_ref));
+    if (rc != 0) {
+        log_query_result_failure(qcode, "prefix", rc, reply_cap);
+        return -101;
+    }
+    if (append_query_string_field(&jb, &first, "sc", scope) != 0 ||
+        append_query_string_field(&jb, &first, "qc", qcode) != 0 ||
+        append_query_string_field(&jb, &first, "wf",
+                                  proto_map_workflow_short_from_runtime(runtime_state_workflow_name(rs->workflow_state),
+                                                                        rs->ready ? 1U : 0U)) != 0) {
+        log_query_result_failure(qcode, "payload", -1, reply_cap);
+        return -102;
+    }
+    rc = proto_envelope_close_payload(&jb);
+    if (rc != 0) {
+        log_query_result_failure(qcode, "close", rc, reply_cap);
+        return -103;
+    }
+    return (int)jb.len;
+}
+
+static int build_query_result_common_status(char *reply, size_t reply_cap, const char *corr,
+                                            const char *session_ref, const char *scope, const char *qcode,
+                                            const runtime_state_t *rs, const common_status_t *cs)
+{
+    json_buf_t jb;
+    uint8_t first = 1U;
+    uint8_t signal_valid = (uint8_t)(rs->signal_csq >= 0 && rs->signal_csq <= 99);
+    uint8_t battery_v_valid = (uint8_t)(cs->battery_voltage_v >= 0.1f && cs->battery_voltage_v <= 64.0f);
+    uint8_t solar_v_valid = (uint8_t)(cs->solar_voltage_v >= 0.0f && cs->solar_voltage_v <= 64.0f);
+    uint8_t battery_soc_valid = (uint8_t)(battery_v_valid != 0U && rs->battery_soc <= 100U);
+    const char *breaker_state = breaker_state_value(rs);
+    int rc;
+
+    json_buf_init(&jb, reply, reply_cap);
+    rc = proto_envelope_append_payload_prefix(&jb, PROTO_MSG_QUERY_RESULT, 0U,
+                                              corr[0] != '\0' ? corr : NULL,
+                                              resolve_reply_session_ref(session_ref));
+    if (rc != 0) {
+        log_query_result_failure(qcode, "prefix", rc, reply_cap);
+        return -101;
+    }
+    if (append_query_string_field(&jb, &first, "sc", scope) != 0 ||
+        append_query_string_field(&jb, &first, "qc", qcode) != 0 ||
+        append_query_u32_field(&jb, &first, "rd", rs->ready ? 1U : 0U) != 0 ||
+        append_query_u32_field(&jb, &first, "on", rs->online ? 1U : 0U) != 0 ||
+        append_query_u32_field(&jb, &first, "tc", rs->tcp_connected ? 1U : 0U) != 0 ||
+        append_query_string_field(&jb, &first, "wf",
+                                  proto_map_workflow_short_from_runtime(runtime_state_workflow_name(rs->workflow_state),
+                                                                        rs->ready ? 1U : 0U)) != 0 ||
+        append_query_u32_field(&jb, &first, "rt", rs->runtime_sec) != 0 ||
+        append_query_u32_field(&jb, &first, "me", rs->meter_epoch) != 0 ||
+        append_query_u32_field(&jb, &first, "cv", rs->config_version) != 0 ||
+        append_query_string_field(&jb, &first, "pm",
+                                  proto_map_power_mode_short(runtime_state_power_name(rs->power_state))) != 0 ||
+        append_query_fixed_field(&jb, &first, "fq", rs->total_m3, 2U) != 0 ||
+        append_query_fixed_field(&jb, &first, "ek", rs->energy_kwh, 2U) != 0) {
+        log_query_result_failure(qcode, "payload", -1, reply_cap);
+        return -102;
+    }
+    if ((signal_valid != 0U && append_query_i32_field(&jb, &first, "csq", rs->signal_csq) != 0) ||
+        (battery_soc_valid != 0U && append_query_u32_field(&jb, &first, "bs", rs->battery_soc) != 0) ||
+        (battery_v_valid != 0U && append_query_fixed_field(&jb, &first, "bv", cs->battery_voltage_v, 2U) != 0) ||
+        (solar_v_valid != 0U && append_query_fixed_field(&jb, &first, "sv", cs->solar_voltage_v, 2U) != 0) ||
+        append_query_string_if_nonempty(&jb, &first, "brs", breaker_state) != 0) {
+        log_query_result_failure(qcode, "optional", -1, reply_cap);
+        return -103;
+    }
+    rc = proto_envelope_close_payload(&jb);
+    if (rc != 0) {
+        log_query_result_failure(qcode, "close", rc, reply_cap);
+        return -104;
+    }
+    return (int)jb.len;
+}
+
+static int build_query_result_electric_meter(char *reply, size_t reply_cap, const char *corr,
+                                             const char *session_ref, const char *scope, const char *qcode,
+                                             const runtime_state_t *rs)
+{
+    json_buf_t jb;
+    uint8_t first = 1U;
+    const char *meter_protocol = meter_protocol_value();
+    int rc;
+
+    json_buf_init(&jb, reply, reply_cap);
+    rc = proto_envelope_append_payload_prefix(&jb, PROTO_MSG_QUERY_RESULT, 0U,
+                                              corr[0] != '\0' ? corr : NULL,
+                                              resolve_reply_session_ref(session_ref));
+    if (rc != 0) {
+        log_query_result_failure(qcode, "prefix", rc, reply_cap);
+        return -101;
+    }
+    if (append_query_string_field(&jb, &first, "sc", scope) != 0 ||
+        append_query_string_field(&jb, &first, "qc", qcode) != 0 ||
+        append_query_string_field(&jb, &first, "wf",
+                                  proto_map_workflow_short_from_runtime(runtime_state_workflow_name(rs->workflow_state),
+                                                                        rs->ready ? 1U : 0U)) != 0 ||
+        append_query_u32_field(&jb, &first, "me", rs->meter_epoch) != 0 ||
+        append_query_u32_field(&jb, &first, "rt", rs->runtime_sec) != 0 ||
+        append_query_fixed_field(&jb, &first, "vv", rs->voltage_v, 1U) != 0 ||
+        append_query_fixed_field(&jb, &first, "ia", rs->current_a, 1U) != 0 ||
+        append_query_fixed_field(&jb, &first, "pw", rs->power_kw, 2U) != 0 ||
+        append_query_fixed_field(&jb, &first, "fq", rs->total_m3, 2U) != 0 ||
+        append_query_fixed_field(&jb, &first, "ek", rs->energy_kwh, 2U) != 0 ||
+        append_query_string_if_nonempty(&jb, &first, "mp", meter_protocol) != 0) {
+        log_query_result_failure(qcode, "payload", -1, reply_cap);
+        return -102;
+    }
+    rc = proto_envelope_close_payload(&jb);
+    if (rc != 0) {
+        log_query_result_failure(qcode, "close", rc, reply_cap);
+        return -103;
+    }
+    return (int)jb.len;
+}
+
+static int build_query_result_upgrade_status(char *reply, size_t reply_cap, const char *corr,
+                                             const char *session_ref, const char *scope, const char *qcode,
+                                             const ota_upgrade_status_t *status)
+{
+    json_buf_t jb;
+    uint8_t first = 1U;
+    int rc;
+
+    json_buf_init(&jb, reply, reply_cap);
+    rc = proto_envelope_append_payload_prefix(&jb, PROTO_MSG_QUERY_RESULT, 0U,
+                                              corr[0] != '\0' ? corr : NULL,
+                                              resolve_reply_session_ref(session_ref));
+    if (rc != 0) {
+        log_query_result_failure(qcode, "prefix", rc, reply_cap);
+        return -101;
+    }
+    if (append_query_string_field(&jb, &first, "sc", scope) != 0 ||
+        append_query_string_field(&jb, &first, "qc", qcode) != 0 ||
+        append_query_string_field(&jb, &first, "ota_stage", status->ota_stage) != 0 ||
+        append_query_u32_field(&jb, &first, "ota_state", status->ota_state) != 0 ||
+        append_query_string_field(&jb, &first, "current_version", status->current_version) != 0 ||
+        append_query_u32_field(&jb, &first, "last_result", status->last_result) != 0 ||
+        append_query_u32_field(&jb, &first, "last_error_code", status->last_error_code) != 0 ||
+        append_query_u32_field(&jb, &first, "download_progress_pct", status->download_progress_pct) != 0 ||
+        append_query_u32_field(&jb, &first, "write_progress_pct", status->write_progress_pct) != 0 ||
+        append_query_string_if_nonempty(&jb, &first, "target_version", status->target_version) != 0 ||
+        append_query_string_if_nonempty(&jb, &first, "package_sha256_hex", status->package_sha256_hex) != 0 ||
+        append_query_string_if_nonempty(&jb, &first, "package_etag", status->package_etag) != 0 ||
+        append_query_string_if_nonempty(&jb, &first, "last_error_message", status->last_error_message) != 0) {
+        log_query_result_failure(qcode, "payload", -1, reply_cap);
+        return -102;
+    }
+    rc = proto_envelope_close_payload(&jb);
+    if (rc != 0) {
+        log_query_result_failure(qcode, "close", rc, reply_cap);
+        return -103;
+    }
+    return (int)jb.len;
+}
+
+static int build_query_result_upgrade_capability(char *reply, size_t reply_cap, const char *corr,
+                                                 const char *session_ref, const char *scope, const char *qcode,
+                                                 const ota_upgrade_capability_t *cap)
+{
+    json_buf_t jb;
+    uint8_t first = 1U;
+    int rc;
+
+    json_buf_init(&jb, reply, reply_cap);
+    rc = proto_envelope_append_payload_prefix(&jb, PROTO_MSG_QUERY_RESULT, 0U,
+                                              corr[0] != '\0' ? corr : NULL,
+                                              resolve_reply_session_ref(session_ref));
+    if (rc != 0) {
+        log_query_result_failure(qcode, "prefix", rc, reply_cap);
+        return -101;
+    }
+    if (append_query_string_field(&jb, &first, "sc", scope) != 0 ||
+        append_query_string_field(&jb, &first, "qc", qcode) != 0 ||
+        append_query_u32_field(&jb, &first, "ota_supported", cap->ota_supported ? 1U : 0U) != 0 ||
+        append_query_u32_field(&jb, &first, "dual_bank", cap->dual_bank ? 1U : 0U) != 0 ||
+        append_query_u32_field(&jb, &first, "min_battery_soc_default", cap->min_battery_soc_default) != 0 ||
+        append_query_u32_field(&jb, &first, "min_signal_csq_default", cap->min_signal_csq_default) != 0 ||
+        append_query_string_if_nonempty(&jb, &first, "package_formats", cap->package_formats) != 0 ||
+        append_query_string_if_nonempty(&jb, &first, "compression_formats", cap->compression_formats) != 0) {
+        log_query_result_failure(qcode, "payload", -1, reply_cap);
+        return -102;
+    }
+    rc = proto_envelope_close_payload(&jb);
+    if (rc != 0) {
+        log_query_result_failure(qcode, "close", rc, reply_cap);
+        return -103;
+    }
+    return (int)jb.len;
 }
 
 static int build_query_nack(char *reply, size_t reply_cap, const char *corr, const char *session_ref,
@@ -231,6 +513,7 @@ int proto_query_handle(const char *json, size_t json_len, char *reply, size_t re
 {
     cJSON *root = NULL;
     cJSON *payload = NULL;
+    char repaired_json[2049];
     char corr[48];
     char session_ref[64];
     char scope[16];
@@ -238,6 +521,7 @@ int proto_query_handle(const char *json, size_t json_len, char *reply, size_t re
     const runtime_state_t *rs;
     const common_status_t *cs;
     int rc;
+    size_t repaired_len = 0U;
 
     (void)json_len;
 
@@ -251,6 +535,20 @@ int proto_query_handle(const char *json, size_t json_len, char *reply, size_t re
     qcode[0] = '\0';
 
     root = cJSON_ParseWithLength(json, json_len);
+    if ((root == NULL || !cJSON_IsObject(root)) && json_len + 1U <= sizeof(repaired_json)) {
+        if (root != NULL) {
+            cJSON_Delete(root);
+            root = NULL;
+        }
+        repaired_len = proto_json_repair_duplicate_separators(json, json_len,
+                                                              repaired_json, sizeof(repaired_json));
+        if (repaired_len > 0U) {
+            root = cJSON_ParseWithLength(repaired_json, repaired_len);
+            if (root != NULL && cJSON_IsObject(root)) {
+                bsp_debug_log("[PROTO] QR repaired duplicate separators in inbound json\r\n");
+            }
+        }
+    }
     if (root == NULL || !cJSON_IsObject(root)) {
         if (root != NULL) {
             cJSON_Delete(root);
@@ -282,153 +580,44 @@ int proto_query_handle(const char *json, size_t json_len, char *reply, size_t re
     }
 
     if (scope_is_common(scope) && query_code_matches(qcode, "qcs", NULL)) {
-        cJSON *out_payload = cJSON_CreateObject();
-        uint8_t signal_valid = (rs->signal_csq >= 0 && rs->signal_csq <= 99) ? 1U : 0U;
-        uint8_t battery_v_valid = (cs->battery_voltage_v >= 0.1f && cs->battery_voltage_v <= 64.0f) ? 1U : 0U;
-        uint8_t solar_v_valid = (cs->solar_voltage_v >= 0.0f && cs->solar_voltage_v <= 64.0f) ? 1U : 0U;
-        uint8_t battery_soc_valid = (battery_v_valid != 0U && rs->battery_soc <= 100U) ? 1U : 0U;
-
-        if (out_payload == NULL ||
-            cJSON_AddStringToObject(out_payload, "sc", scope) == NULL ||
-            cJSON_AddStringToObject(out_payload, "qc", qcode) == NULL ||
-            cJSON_AddNumberToObject(out_payload, "rd", rs->ready ? 1.0 : 0.0) == NULL ||
-            cJSON_AddNumberToObject(out_payload, "on", rs->online ? 1.0 : 0.0) == NULL ||
-            cJSON_AddNumberToObject(out_payload, "tc", rs->tcp_connected ? 1.0 : 0.0) == NULL ||
-            cJSON_AddStringToObject(out_payload, "wf",
-                                    proto_map_workflow_short_from_runtime(runtime_state_workflow_name(rs->workflow_state),
-                                                                          rs->ready ? 1U : 0U)) == NULL ||
-            cJSON_AddNumberToObject(out_payload, "rt", (double)rs->runtime_sec) == NULL ||
-            cJSON_AddNumberToObject(out_payload, "me", (double)rs->meter_epoch) == NULL ||
-            add_number_if_valid(out_payload, "csq", (double)rs->signal_csq, signal_valid) != 0 ||
-            add_number_if_valid(out_payload, "bs", (double)rs->battery_soc, battery_soc_valid) != 0 ||
-            add_number_if_valid(out_payload, "bv", (double)cs->battery_voltage_v, battery_v_valid) != 0 ||
-            add_number_if_valid(out_payload, "sv", (double)cs->solar_voltage_v, solar_v_valid) != 0 ||
-            cJSON_AddNumberToObject(out_payload, "cv", (double)rs->config_version) == NULL ||
-            cJSON_AddStringToObject(out_payload, "pm",
-                                    proto_map_power_mode_short(runtime_state_power_name(rs->power_state))) == NULL ||
-            add_number_if_valid(out_payload, "fq", (double)rs->total_m3,
-                                (uint8_t)(rs->total_m3 >= 0.0f && rs->total_m3 <= 10000000.0f)) != 0 ||
-            add_number_if_valid(out_payload, "ek", (double)rs->energy_kwh,
-                                (uint8_t)(rs->energy_kwh >= 0.0f && rs->energy_kwh <= 10000000.0f)) != 0 ||
-            (breaker_state_value(rs) != NULL &&
-             add_string_if_nonempty(out_payload, "brs", breaker_state_value(rs)) != 0)) {
-            cJSON_Delete(root);
-            cJSON_Delete(out_payload);
-            return build_query_nack(reply, reply_cap, corr, session_ref, scope, qcode, "DEVICE_BUSY", "build qcs failed");
-        }
-        rc = build_query_result(reply, reply_cap, corr, session_ref, out_payload);
+        rc = build_query_result_common_status(reply, reply_cap, corr, session_ref, scope, qcode, rs, cs);
         cJSON_Delete(root);
-        cJSON_Delete(out_payload);
         return rc >= 0 ? rc : build_query_nack(reply, reply_cap, corr, session_ref, scope, qcode, "DEVICE_BUSY", "send qcs failed");
     }
 
     if (strcmp(scope, "wf") == 0 && strcmp(qcode, "qwf") == 0) {
-        cJSON *out_payload = cJSON_CreateObject();
-
-        if (out_payload == NULL ||
-            cJSON_AddStringToObject(out_payload, "sc", scope) == NULL ||
-            cJSON_AddStringToObject(out_payload, "qc", qcode) == NULL ||
-            cJSON_AddStringToObject(out_payload, "wf",
-                                    proto_map_workflow_short_from_runtime(runtime_state_workflow_name(rs->workflow_state),
-                                                                          rs->ready ? 1U : 0U)) == NULL) {
-            cJSON_Delete(root);
-            cJSON_Delete(out_payload);
-            return build_query_nack(reply, reply_cap, corr, session_ref, scope, qcode, "DEVICE_BUSY", "build qwf failed");
-        }
-        rc = proto_json_build_message(reply, reply_cap, PROTO_MSG_QUERY_RESULT, 0U,
-                                      corr[0] != '\0' ? corr : NULL,
-                                      resolve_reply_session_ref(session_ref),
-                                      out_payload);
+        rc = build_query_result_workflow_state(reply, reply_cap, corr, session_ref, scope, qcode, rs);
         cJSON_Delete(root);
         return rc >= 0 ? rc : build_query_nack(reply, reply_cap, corr, session_ref, scope, qcode, "DEVICE_BUSY", "send qwf failed");
     }
 
     if (scope_is_common(scope) && query_code_matches(qcode, "qem", NULL)) {
-        cJSON *out_payload = cJSON_CreateObject();
-
-        if (out_payload == NULL ||
-            cJSON_AddStringToObject(out_payload, "sc", scope) == NULL ||
-            cJSON_AddStringToObject(out_payload, "qc", qcode) == NULL ||
-            cJSON_AddStringToObject(out_payload, "wf",
-                                    proto_map_workflow_short_from_runtime(runtime_state_workflow_name(rs->workflow_state),
-                                                                          rs->ready ? 1U : 0U)) == NULL ||
-            (meter_protocol_value() != NULL &&
-             add_string_if_nonempty(out_payload, "mp", meter_protocol_value()) != 0) ||
-            cJSON_AddNumberToObject(out_payload, "me", (double)rs->meter_epoch) == NULL ||
-            cJSON_AddNumberToObject(out_payload, "rt", (double)rs->runtime_sec) == NULL ||
-            add_number_if_valid(out_payload, "vv", (double)rs->voltage_v,
-                                (uint8_t)(rs->voltage_v >= 0.0f && rs->voltage_v <= 1000.0f)) != 0 ||
-            add_number_if_valid(out_payload, "ia", (double)rs->current_a,
-                                (uint8_t)(rs->current_a >= 0.0f && rs->current_a <= 1000.0f)) != 0 ||
-            add_number_if_valid(out_payload, "pw", (double)rs->power_kw,
-                                (uint8_t)(rs->power_kw >= 0.0f && rs->power_kw <= 500.0f)) != 0 ||
-            add_number_if_valid(out_payload, "fq", (double)rs->total_m3,
-                                (uint8_t)(rs->total_m3 >= 0.0f && rs->total_m3 <= 10000000.0f)) != 0 ||
-            add_number_if_valid(out_payload, "ek", (double)rs->energy_kwh,
-                                (uint8_t)(rs->energy_kwh >= 0.0f && rs->energy_kwh <= 10000000.0f)) != 0) {
-            cJSON_Delete(root);
-            cJSON_Delete(out_payload);
-            return build_query_nack(reply, reply_cap, corr, session_ref, scope, qcode, "DEVICE_BUSY", "build qem failed");
-        }
-        rc = build_query_result(reply, reply_cap, corr, session_ref, out_payload);
+        rc = build_query_result_electric_meter(reply, reply_cap, corr, session_ref, scope, qcode, rs);
         cJSON_Delete(root);
-        cJSON_Delete(out_payload);
         return rc >= 0 ? rc : build_query_nack(reply, reply_cap, corr, session_ref, scope, qcode, "DEVICE_BUSY", "send qem failed");
     }
 
     if (scope_is_common(scope) && query_code_matches(qcode, "qgs", NULL)) {
-        cJSON *out_payload = cJSON_CreateObject();
         ota_upgrade_status_t status;
 
-        if (proto_ota_query_upgrade_status(&status) != 0 ||
-            out_payload == NULL ||
-            cJSON_AddStringToObject(out_payload, "sc", scope) == NULL ||
-            cJSON_AddStringToObject(out_payload, "qc", qcode) == NULL ||
-            cJSON_AddNumberToObject(out_payload, "ota_state", (double)status.ota_state) == NULL ||
-            cJSON_AddStringToObject(out_payload, "current_version", status.current_version) == NULL ||
-            cJSON_AddNumberToObject(out_payload, "last_result", (double)status.last_result) == NULL ||
-            cJSON_AddNumberToObject(out_payload, "last_error_code", (double)status.last_error_code) == NULL ||
-            add_number_if_valid(out_payload, "download_progress_pct", (double)status.download_progress_pct, 1U) != 0 ||
-            add_number_if_valid(out_payload, "write_progress_pct", (double)status.write_progress_pct, 1U) != 0 ||
-            (status.target_version[0] != '\0' &&
-             add_string_if_nonempty(out_payload, "target_version", status.target_version) != 0) ||
-            (status.package_sha256_hex[0] != '\0' &&
-             add_string_if_nonempty(out_payload, "package_sha256_hex", status.package_sha256_hex) != 0) ||
-            (status.last_error_message[0] != '\0' &&
-             add_string_if_nonempty(out_payload, "last_error_message", status.last_error_message) != 0)) {
+        if (proto_ota_query_upgrade_status(&status) != 0) {
             cJSON_Delete(root);
-            cJSON_Delete(out_payload);
             return build_query_nack(reply, reply_cap, corr, session_ref, scope, qcode, "DEVICE_BUSY", "build upgrade status failed");
         }
-        rc = build_query_result(reply, reply_cap, corr, session_ref, out_payload);
+        rc = build_query_result_upgrade_status(reply, reply_cap, corr, session_ref, scope, qcode, &status);
         cJSON_Delete(root);
-        cJSON_Delete(out_payload);
         return rc >= 0 ? rc : build_query_nack(reply, reply_cap, corr, session_ref, scope, qcode, "DEVICE_BUSY", "send upgrade status failed");
     }
 
     if (scope_is_common(scope) && query_code_matches(qcode, "qgc", NULL)) {
-        cJSON *out_payload = cJSON_CreateObject();
         ota_upgrade_capability_t cap;
 
-        if (proto_ota_query_upgrade_capability(&cap) != 0 ||
-            out_payload == NULL ||
-            cJSON_AddStringToObject(out_payload, "sc", scope) == NULL ||
-            cJSON_AddStringToObject(out_payload, "qc", qcode) == NULL ||
-            add_bool_number(out_payload, "ota_supported", cap.ota_supported) != 0 ||
-            add_bool_number(out_payload, "dual_bank", cap.dual_bank) != 0 ||
-            cJSON_AddNumberToObject(out_payload, "min_battery_soc_default", (double)cap.min_battery_soc_default) == NULL ||
-            cJSON_AddNumberToObject(out_payload, "min_signal_csq_default", (double)cap.min_signal_csq_default) == NULL ||
-            (cap.package_formats[0] != '\0' &&
-             add_string_if_nonempty(out_payload, "package_formats", cap.package_formats) != 0) ||
-            (cap.compression_formats[0] != '\0' &&
-             add_string_if_nonempty(out_payload, "compression_formats", cap.compression_formats) != 0)) {
+        if (proto_ota_query_upgrade_capability(&cap) != 0) {
             cJSON_Delete(root);
-            cJSON_Delete(out_payload);
             return build_query_nack(reply, reply_cap, corr, session_ref, scope, qcode, "DEVICE_BUSY", "build upgrade capability failed");
         }
-        rc = build_query_result(reply, reply_cap, corr, session_ref, out_payload);
+        rc = build_query_result_upgrade_capability(reply, reply_cap, corr, session_ref, scope, qcode, &cap);
         cJSON_Delete(root);
-        cJSON_Delete(out_payload);
         return rc >= 0 ? rc : build_query_nack(reply, reply_cap, corr, session_ref, scope, qcode, "DEVICE_BUSY", "send upgrade capability failed");
     }
 

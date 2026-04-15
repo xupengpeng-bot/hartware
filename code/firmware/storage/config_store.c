@@ -18,7 +18,8 @@ static void config_store_fill_defaults(device_config_t *cfg)
     cfg->feature_modules.breaker_control = 1U;
 
     cfg->runtime_rules.heartbeat_interval_sec = 30U;
-    cfg->runtime_rules.snapshot_interval_sec = 60U;
+    cfg->runtime_rules.snapshot_idle_interval_sec = 300U;
+    cfg->runtime_rules.snapshot_running_interval_sec = 30U;
     cfg->runtime_rules.cloud_auth_timeout_ms = 8000U;
     cfg->runtime_rules.workflow_enabled = 1U;
 

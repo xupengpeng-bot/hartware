@@ -3,6 +3,7 @@
 #include "common_identity.h"
 #include "config_store.h"
 #include "module_meter.h"
+#include "proto_capability.h"
 #include "proto_codec_json.h"
 #include "proto_envelope.h"
 
@@ -66,6 +67,24 @@ static int append_u32_field(json_buf_t *jb, const char *key, uint32_t value, uin
     }
     *first = 0U;
     return json_buf_append_fmt(jb, "\"%s\":%lu", key, (unsigned long)value);
+}
+
+static int append_raw_json_field(json_buf_t *jb, const char *key, const char *value, uint8_t *first)
+{
+    if (jb == NULL || key == NULL || value == NULL || first == NULL) {
+        return -1;
+    }
+    if (*first == 0U && json_buf_append(jb, ",") != 0) {
+        return -1;
+    }
+    *first = 0U;
+    if (json_buf_append(jb, "\"") != 0 ||
+        json_buf_append(jb, key) != 0 ||
+        json_buf_append(jb, "\":") != 0 ||
+        json_buf_append(jb, value) != 0) {
+        return -1;
+    }
+    return 0;
 }
 
 static void fill_default_feature_modules(feature_modules_t *fm)
@@ -164,6 +183,7 @@ int proto_register_build(char *buf, size_t cap)
     json_buf_t jb;
     const controller_identity_t *id;
     const device_config_t *cfg;
+    proto_capability_info_t capability;
     feature_modules_t fm;
     uint32_t config_version = 1U;
     uint8_t first = 1U;
@@ -183,6 +203,9 @@ int proto_register_build(char *buf, size_t cap)
         filter_real_feature_modules(&fm, &cfg->feature_modules);
         config_version = cfg->config_version;
     }
+    if (cfg == NULL || proto_capability_describe(cfg, &fm, &capability) != 0) {
+        return -2;
+    }
 
     json_buf_init(&jb, buf, cap);
     if (proto_envelope_append_payload_prefix(&jb, PROTO_MSG_REGISTER, 0U, NULL, NULL) != 0) {
@@ -194,7 +217,13 @@ int proto_register_build(char *buf, size_t cap)
         append_string_field(&jb, "ff", id->firmware_family, &first) != 0 ||
         append_string_field(&jb, "fv", id->firmware_version, &first) != 0 ||
         append_u32_field(&jb, "cv", config_version, &first) != 0 ||
-        append_feature_modules(&jb, &fm, &first) != 0) {
+        append_feature_modules(&jb, &fm, &first) != 0 ||
+        append_u32_field(&jb, "cap_ver", capability.capability_version, &first) != 0 ||
+        append_string_field(&jb, "cap_hash", capability.capability_hash, &first) != 0 ||
+        append_string_field(&jb, "config_bitmap", capability.config_bitmap_hex, &first) != 0 ||
+        append_string_field(&jb, "actions_bitmap", capability.actions_bitmap_hex, &first) != 0 ||
+        append_string_field(&jb, "queries_bitmap", capability.queries_bitmap_hex, &first) != 0 ||
+        append_raw_json_field(&jb, "limits", capability.limits_json, &first) != 0) {
         return -4;
     }
     if (register_meter_protocol(&fm) != NULL &&

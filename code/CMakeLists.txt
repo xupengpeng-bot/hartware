@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 project(embedded_controller_fw C)
 
 set(CMAKE_C_STANDARD 99)
+option(FW_SLIM_OTA_BUILD "Enable safe code-size optimizations for OTA release builds" ON)
 
 # 交叉工具链下为所有目标统一 Cortex-M3（否则静态库可能用错默认 CPU）
 if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER MATCHES "arm-none-eabi")
@@ -56,6 +57,7 @@ add_library(controller_firmware STATIC
     firmware/protocol/proto_dispatch.c
     firmware/protocol/proto_codec_json.c
     firmware/protocol/proto_command.c
+    firmware/protocol/proto_capability.c
     firmware/protocol/proto_register.c
     firmware/protocol/proto_state_snapshot.c
     firmware/protocol/proto_event_report.c
@@ -102,8 +104,17 @@ add_library(controller_firmware STATIC
     firmware/port/ota_port_board.c
     firmware/app/app_context.c
     firmware/app/app_health.c
-    firmware/app/app_scheduler.c
     firmware/app/app_main.c
+    firmware/app/app_scheduler.c
+)
+
+# ARM + Ninja 增量构建下，版本头变更曾出现对象未重编的情况。
+# 这里显式把版本头挂到直接使用它的源文件上，避免生成混合版本 BIN。
+set_source_files_properties(
+    firmware/common/common_identity.c
+    firmware/app/main.c
+    PROPERTIES
+        OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/firmware/config/scan_trial_defs.h"
 )
 
 if(FW_PLATFORM_CONFIG_DIR)
@@ -137,6 +148,13 @@ target_link_libraries(controller_firmware PRIVATE stm32f1_flash)
 
 if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER MATCHES "arm-none-eabi")
     target_compile_definitions(controller_firmware PRIVATE BOARD_STM32F103=1)
+    if(FW_SLIM_OTA_BUILD)
+        target_compile_definitions(controller_firmware PRIVATE
+            FW_MODEM_VERBOSE_LOG=0
+            FW_OTA_VERBOSE_LOG=0
+            FW_PROTO_VERBOSE_LOG=0
+        )
+    endif()
     target_compile_options(controller_ota PRIVATE
         -Os
         -fomit-frame-pointer

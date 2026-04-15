@@ -1,0 +1,20 @@
+#ifndef SCAN_TRIAL_DEFS_H
+#define SCAN_TRIAL_DEFS_H
+
+#define SCAN_TRIAL_PROTOCOL_VERSION      "1.0.0"
+#define SCAN_TRIAL_CONTROLLER_CODE       "scan_irrigation_valve_controller_a01"
+#define SCAN_TRIAL_CONTROLLER_ROLE       "scan_irrigation_valve_controller"
+#define SCAN_TRIAL_DEPLOYMENT_MODE       "standalone"
+#define SCAN_TRIAL_CONTROLLER_NAME       "Scan Irrigation Valve Controller A01"
+
+#define SCAN_TRIAL_HARDWARE_VERSION_CODE "HW-SCAN-IRR-VALVE-CTRL-4G-A01"
+#define SCAN_TRIAL_HARDWARE_NAME         "Scan Irrigation Valve Control A01"
+#define SCAN_TRIAL_HARDWARE_SKU          "SCAN-IRR-VALVE-CTRL-4G"
+#define SCAN_TRIAL_HARDWARE_REV          "A01"
+
+#define SCAN_TRIAL_SOFTWARE_VERSION_CODE "SW-SCAN-IRRIGATION-VALVE-CONTROL-v0.1.46"
+#define SCAN_TRIAL_SOFTWARE_NAME         "SCAN-IRR-VALVE-CTRL-4G-A01 v0.1.46"
+#define SCAN_TRIAL_SOFTWARE_FAMILY       "SCAN-IRRIGATION-VALVE-CONTROL"
+#define SCAN_TRIAL_SOFTWARE_VERSION      "0.1.46"
+
+#endif /* SCAN_TRIAL_DEFS_H */

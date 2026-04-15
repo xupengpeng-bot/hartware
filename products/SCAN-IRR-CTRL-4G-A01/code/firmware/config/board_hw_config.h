@@ -1,0 +1,130 @@
+/*
+ * 机井3.0 — 《机井3.0原理图优化.pdf》（与早期 SCH_Schematic1_1 / 2.x 板卡不同 PCB）
+ *
+ * STM32F103RCT6 外设引脚（与 PDF MCU 页、网络标一致）：
+ * - 4G：UART4 PC10/PC11；EC800_POWER=PC5；NET_PWRKEY=PB4（经电平/驱动至模组 PWRKEY）
+ * - 调试：UART5 PC12/PD2（机井3.0 在 CN5 等位置引出 TX5/RX5，另含 EC800_POWER 等）
+ * - 刷卡：USART1 PA9/PA10（CN3）
+ * - RS485：USART2 PA2/PA3，方向 PA1，隔离 U8 CA-IS3092W
+ * - 电池检测：BAT_TEST 使能 = PA12；ACC 采样 = PA0（ADC1_IN0）
+ * - 继电器：RELAY1=PC1；RELAY2=PC3；当前固件默认将 RELAY1 作为 pump_run 真实输出
+ * - 阀线圈驱动：INA1=PB14；INA2=PB15；INB1=PC6；INB2=PC7
+ * - 灯语：PC0/PC2 原理图未作为独立状态灯使用，避免与真实执行引脚冲突
+ * - 语音等外围：同 PDF（固件按需扩展）
+ */
+#ifndef BOARD_HW_CONFIG_H
+#define BOARD_HW_CONFIG_H
+
+/* 外接 HSE 晶振频率（Hz），须与 board_clock 里 PLL 倍频一致；非 8MHz 时要同步改 PLL */
+#ifndef BOARD_HSE_VALUE_HZ
+#define BOARD_HSE_VALUE_HZ 8000000U
+#endif
+
+/*
+ * 机井 3.0 参考程序实际运行在 HSE+PLL 72MHz。
+ * 置 0：启用 72MHz + 动态 USART BRR（当前默认，优先贴近参考程序）。
+ * 置 1：退回 HSI 8MHz + 固定 BRR 表，仅在排查时钟问题时临时使用。
+ */
+#ifndef BOARD_CLOCK_LAO_CAO_HSI_8MHZ
+#define BOARD_CLOCK_LAO_CAO_HSI_8MHZ 0
+#endif
+
+/* 调试串口波特率（UART5）；乱码时可改为 9600 再试 */
+#ifndef BOARD_UART_DEBUG_BAUD
+#define BOARD_UART_DEBUG_BAUD 115200U
+#endif
+
+#define BOARD_HW_SCHEMATIC_FILE "机井3.0原理图优化.pdf"
+#define BOARD_HW_MCU_PART_STR   "STM32F103RCT6"
+
+#define BOARD_HW_MODEM_PART_STR "EC801ECNLE-N01-SNNSA"
+
+#define BOARD_HW_USART_INSTANCE_CARD_READER 1
+#define BOARD_HW_PIN_USART1_TX_PORT_A 9U
+#define BOARD_HW_PIN_USART1_RX_PORT_A 10U
+
+#define BOARD_HW_USART_INSTANCE_4G 4
+#define BOARD_HW_PIN_UART4_TX_PORT_C 10U
+#define BOARD_HW_PIN_UART4_RX_PORT_C 11U
+#define BOARD_HW_PIN_NET_POWER_PORT_C 5U
+/* 已确认：PB4 = NET_PWRKEY */
+#define BOARD_HW_PIN_NET_PWRKEY_PORT_B 4U
+/* 0：MCU 低脉冲=模组 PWRKEY 拉低（直连 Quectel）；1：经三极管反相（机井3.0 原理图「电平/驱动」）MCU 高脉冲开机 */
+#ifndef BOARD_HW_MODEM_PWRKEY_INVERTED
+#define BOARD_HW_MODEM_PWRKEY_INVERTED 1
+#endif
+
+#define BOARD_HW_HAS_DUAL_SIM 1
+
+#define BOARD_HW_RS485_ISOLATOR_STR "CA-IS3092W"
+#define BOARD_HW_USART_INSTANCE_RS485 2
+#define BOARD_HW_PIN_RS485_DIR_PORT_A 1U
+#define BOARD_HW_PIN_USART2_TX_PORT_A 2U
+#define BOARD_HW_PIN_USART2_RX_PORT_A 3U
+
+#define BOARD_HW_I2C_INSTANCE_SENSOR 2
+#define BOARD_HW_PIN_I2C2_SCL_PORT_B 10U
+#define BOARD_HW_PIN_I2C2_SDA_PORT_B 11U
+
+#define BOARD_HW_UART_PORT_CARD_READER BOARD_HW_USART_INSTANCE_CARD_READER
+
+/* UART5 逻辑端口 5：PC12/PD2 */
+#define BOARD_HW_UART_PORT_CN4_DEBUG 5
+#define BOARD_HW_UART_PORT_DEBUG     BOARD_HW_UART_PORT_CN4_DEBUG
+
+#define BOARD_HW_VOICE_IC_STR     "BSO615NV"
+#define BOARD_HW_MOTOR_DRIVER_STR "AS4950"
+#define BOARD_HW_HAS_ELECTRIC_METER 1U
+
+/*
+ * U7 语音芯片（原理图第 2 页）采用 one-line 控制接法：
+ * - PC4 -> DATA
+ * - PC8 -> RESET
+ * - PA8 -> BUSY
+ *
+ * 原理图网络名把 PA8 标成了 VOICE_CLK，但 U7 器件脚标实际为 BUSY。
+ * 固件按器件功能建模，避免继续把 BUSY 当成时钟输出。
+ */
+#define BOARD_HW_HAS_VOICE_CHIP          0U
+#define BOARD_HW_PIN_VOICE_DATA_PORT_C   4U
+#define BOARD_HW_PIN_VOICE_RESET_PORT_C  8U
+#define BOARD_HW_PIN_VOICE_BUSY_PORT_A   8U
+#define BOARD_HW_VOICE_BUSY_ACTIVE_LEVEL 0U
+
+#define BOARD_HW_PIN_ACC_PORT_A 0U
+/* 机井3.0：PA12；旧板为 PB12 时置 0 并改用下方 PORT_B */
+#define BOARD_HW_BAT_TEST_ON_GPIOA 1U
+#define BOARD_HW_PIN_BAT_TEST_ENABLE 12U
+
+/* Battery voltage is sampled on the ACC node after BAT_TEST enables the sense path. */
+#define BOARD_HW_ADC1_CHANNEL_BAT_TEST 0U
+#define BOARD_HW_ADC_BAT_TEST_PORT_A_PIN 0U
+
+#define BOARD_HW_ADC1_CHANNEL_ACC_ANALOG 0U
+#define BOARD_HW_ADC1_CHANNEL_SOLAR_OR_MPPT 0xFFU
+
+#define BOARD_HW_UART_PORT_MODEM_4G BOARD_HW_USART_INSTANCE_4G
+#define BOARD_HW_UART_PORT_RS485    BOARD_HW_USART_INSTANCE_RS485
+
+/* Schematic-verified actuator mappings:
+ * - RELAY1 -> PC1
+ * - RELAY2 -> PC3
+ * - Valve A coil driver: INA1=PB14, INA2=PB15
+ * - Valve B coil driver: INB1=PC6, INB2=PC7
+ */
+#define BOARD_HW_PIN_RELAY1_PORT_C       1U
+#define BOARD_HW_PIN_RELAY2_PORT_C       3U
+#define BOARD_HW_PIN_PUMP_RUN_PORT_C     BOARD_HW_PIN_RELAY1_PORT_C
+#define BOARD_HW_PUMP_RUN_ACTIVE_LEVEL   1U
+
+#define BOARD_HW_PIN_VALVE1_IN1_PORT_B   14U
+#define BOARD_HW_PIN_VALVE1_IN2_PORT_B   15U
+#define BOARD_HW_PIN_VALVE2_IN1_PORT_C   6U
+#define BOARD_HW_PIN_VALVE2_IN2_PORT_C   7U
+
+/* 灯语：当前板无独立状态灯输出时全部关闭，避免与真实执行引脚冲突。 */
+#define BOARD_HW_PIN_STATUS_LED_NONE     0xFFU
+#define BOARD_HW_PIN_STATUS_LED_A_PORT_C BOARD_HW_PIN_STATUS_LED_NONE
+#define BOARD_HW_PIN_STATUS_LED_B_PORT_C BOARD_HW_PIN_STATUS_LED_NONE
+
+#endif /* BOARD_HW_CONFIG_H */

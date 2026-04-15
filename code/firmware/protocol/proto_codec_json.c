@@ -145,6 +145,54 @@ static const char *json_find_value_start(const char *json, const char *key)
     return p;
 }
 
+size_t proto_json_repair_duplicate_separators(const char *json, size_t json_len, char *out, size_t out_cap)
+{
+    size_t i;
+    size_t w = 0U;
+    size_t repaired = 0U;
+    uint8_t in_string = 0U;
+    uint8_t escape = 0U;
+
+    if (json == NULL || out == NULL || out_cap == 0U || json_len == 0U) {
+        return 0U;
+    }
+    if (json_len + 1U > out_cap) {
+        return 0U;
+    }
+
+    for (i = 0U; i < json_len; i++) {
+        unsigned char ch = (unsigned char)json[i];
+
+        if (in_string != 0U) {
+            out[w++] = (char)ch;
+            if (escape != 0U) {
+                escape = 0U;
+            } else if (ch == '\\') {
+                escape = 1U;
+            } else if (ch == '"') {
+                in_string = 0U;
+            }
+            continue;
+        }
+
+        if (ch == '"') {
+            out[w++] = (char)ch;
+            in_string = 1U;
+            continue;
+        }
+
+        if ((ch == ':' || ch == ',') && w > 0U && out[w - 1U] == (char)ch) {
+            repaired++;
+            continue;
+        }
+
+        out[w++] = (char)ch;
+    }
+
+    out[w] = '\0';
+    return repaired > 0U ? w : 0U;
+}
+
 int proto_json_get_string(const char *json, const char *key, char *out, size_t out_sz)
 {
     const char *p;

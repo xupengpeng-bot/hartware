@@ -8,11 +8,13 @@
 #include "proto_codec_json.h"
 #include "proto_dispatch.h"
 #include "proto_envelope.h"
+#include "proto_execute_action.h"
 #include "proto_register.h"
 #include "runtime_state.h"
 #include "common_identity.h"
 #include "cJSON.h"
 
+#include "bsp_system.h"
 #include "bsp_uart.h"
 
 #include <ctype.h>
@@ -27,6 +29,7 @@ static uint32_t s_next_register_attempt_ms;
 static uint32_t s_last_poll_ms;
 static uint32_t s_tcp_connected_since_ms;
 static uint32_t s_last_tx_ms;
+static uint32_t s_last_downlink_warn_ms;
 static uint8_t s_register_pending;
 static uint8_t s_register_inflight;
 static uint8_t s_register_retry_stage;
@@ -42,6 +45,8 @@ static net_disconnect_diag_t s_last_disconnect_diag;
 #define NET_REGISTER_IDENTITY_RETRY_MS 10000U
 #define NET_MODEM_WARMUP_MS     20000U
 #define NET_MAX_INBOUND_FRAMES_PER_POLL 2U
+#define NET_DOWNLINK_IDLE_WARN_MS 120000U
+#define NET_OTA_PAUSE_TX_FLUSH_GUARD_MS 800U
 
 static char s_rx_json[NET_JSON_FRAME_MAX];
 static char s_tx_json[NET_JSON_FRAME_MAX];
@@ -341,6 +346,14 @@ void net_connectivity_get_last_disconnect_diag(net_disconnect_diag_t *out)
     *out = s_last_disconnect_diag;
 }
 
+uint32_t net_connectivity_last_uplink_age_ms(uint32_t monotonic_ms)
+{
+    if (s_last_tx_ms == 0U) {
+        return UINT32_MAX;
+    }
+    return (uint32_t)(monotonic_ms - s_last_tx_ms);
+}
+
 static int tcp_send_json_frame(const char *json_body, size_t json_len)
 {
     int n;
@@ -429,13 +442,31 @@ void net_connectivity_force_reconnect(void)
 
 void net_connectivity_pause_for_ota(void)
 {
+    uint32_t pause_ms = s_last_poll_ms;
+
     if (s_paused_for_ota != 0U) {
         return;
     }
-    s_paused_for_ota = 1U;
     if (s_sock.connected != 0 || net_4g_modem_tcp_is_connected() != 0) {
-        net_handle_disconnect("ota_pause", s_last_poll_ms, 0U);
+        uint32_t tx_age_ms = net_connectivity_last_uplink_age_ms(s_last_poll_ms);
+
+        if (tx_age_ms != UINT32_MAX && tx_age_ms < NET_OTA_PAUSE_TX_FLUSH_GUARD_MS) {
+            uint32_t wait_ms = NET_OTA_PAUSE_TX_FLUSH_GUARD_MS - tx_age_ms;
+            char line[160];
+
+            (void)snprintf(line, sizeof(line),
+                           "[PROTO] ota_pause flush guard wait=%lu ms after %s/%luB\r\n",
+                           (unsigned long)wait_ms,
+                           s_last_tx_type[0] != '\0' ? s_last_tx_type : "NONE",
+                           (unsigned long)s_last_tx_len);
+            bsp_debug_log(line);
+            bsp_system_delay_ms(wait_ms);
+            pause_ms += wait_ms;
+        }
+        s_paused_for_ota = 1U;
+        net_handle_disconnect("ota_pause", pause_ms, 0U);
     } else {
+        s_paused_for_ota = 1U;
         common_status_set_tcp_connected(false);
         common_status_set_registered(false);
     }
@@ -482,6 +513,7 @@ void net_connectivity_init(void)
     s_last_poll_ms = 0U;
     s_tcp_connected_since_ms = 0U;
     s_last_tx_ms = 0U;
+    s_last_downlink_warn_ms = 0U;
     s_last_tx_len = 0U;
     s_register_pending = 1U;
     s_register_inflight = 0U;
@@ -503,17 +535,17 @@ void net_connectivity_poll(uint32_t monotonic_ms)
     uint8_t modem_online;
 
     s_last_poll_ms = monotonic_ms;
+    if (s_paused_for_ota != 0U) {
+        common_status_set_online(net_4g_modem_is_online());
+        common_status_set_tcp_connected(false);
+        common_status_set_registered(false);
+        return;
+    }
     net_4g_modem_poll(monotonic_ms);
     status_snapshot = common_status_get();
     was_online = (status_snapshot != NULL && status_snapshot->online) ? 1U : 0U;
     modem_online = net_4g_modem_is_online() ? 1U : 0U;
     common_status_set_online(modem_online != 0U);
-
-    if (s_paused_for_ota != 0U) {
-        common_status_set_tcp_connected(false);
-        common_status_set_registered(false);
-        return;
-    }
 
     if (modem_online == 0U) {
         if (s_sock.connected != 0 || was_online != 0U) {
@@ -569,6 +601,22 @@ void net_connectivity_poll(uint32_t monotonic_ms)
         return;
     }
 
+    if (net_4g_modem_tcp_has_seen_downlink() != 0) {
+        uint32_t downlink_idle_ms = net_4g_modem_downlink_idle_age_ms(monotonic_ms);
+        if (downlink_idle_ms >= NET_DOWNLINK_IDLE_WARN_MS &&
+            (s_last_downlink_warn_ms == 0U ||
+             (uint32_t)(monotonic_ms - s_last_downlink_warn_ms) >= 30000U)) {
+            char line[168];
+            s_last_downlink_warn_ms = monotonic_ms;
+            (void)snprintf(line, sizeof(line),
+                           "[PROTO] WARN: downlink idle=%lu ms on connected TCP session; uplink may be alive while recv path is stalled\r\n",
+                           (unsigned long)downlink_idle_ms);
+            bsp_debug_log(line);
+        }
+    } else {
+        s_last_downlink_warn_ms = 0U;
+    }
+
     net_try_register(monotonic_ms);
 
     for (uint32_t handled = 0U; handled < NET_MAX_INBOUND_FRAMES_PER_POLL; handled++) {
@@ -588,8 +636,12 @@ void net_connectivity_poll(uint32_t monotonic_ms)
             continue;
         }
         if (reply_len > 0U) {
+            int reply_rc;
+
             net_log_json("TX", s_tx_json, reply_len);
-            if (tcp_send_json_frame(s_tx_json, reply_len) >= 0) {
+            reply_rc = tcp_send_json_frame(s_tx_json, reply_len);
+            proto_execute_action_on_reply_send_result(reply_rc, monotonic_ms);
+            if (reply_rc >= 0) {
                 bsp_debug_log("[PROTO] command reply send success\r\n");
             } else {
                 bsp_debug_log("[PROTO] command reply send failed\r\n");
