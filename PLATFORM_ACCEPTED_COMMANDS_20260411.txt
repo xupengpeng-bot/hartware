@@ -1,6 +1,6 @@
 扫码灌溉控制板 - 当前固件可接受指令清单
 生成日期: 2026-04-11
-适用固件目录: D:\20251211\智能体\hardware\new\code\firmware
+适用固件目录: D:\Develop\houji\houjinongfuAI-Cursor\hartware\code\firmware
 
 一、顶层短协议
 设备当前只接受以下顶层 envelope 字段:

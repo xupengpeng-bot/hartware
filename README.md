@@ -6,7 +6,7 @@ Audience: firmware, hardware, debug, AI agents
 This repository now serves two roles at once:
 
 - active embedded source/build workspace
-- development-system workspace for embedded delivery and governance
+- project coordination workspace for embedded delivery and governance
 
 ## Current Board Identity
 
@@ -27,18 +27,14 @@ Source of truth:
   - active shared firmware source tree
 - `build_flash`
   - active flashing, serial capture, and local bench helpers used by the current build chain
-- `build_codex_arm`
-  - current local ARM build output
-- `build_codex_check`
-  - local validation/build check output
 - `products`
   - per-product firmware baselines copied from the active shared program when a new product line needs to branch independently
 - `Hardware`
   - board-specific hardware assets grouped by hardware name
 - `projects`
-  - project-specific development-system workspace
+  - project-specific coordination and delivery workspace
 - `shared`
-  - shared development-system rules and templates
+  - shared delivery rules and templates
 
 ## Hardware Layout Rule
 
@@ -58,7 +54,7 @@ Keep these shared at repository root unless we do a dedicated build-system split
 
 - `code`
 - `build_flash`
-- active local build output directories
+- local build output directories may appear temporarily, but they are ignored local artifacts rather than stable tracked structure
 
 This keeps the current build scripts working while making room for more board variants.
 
@@ -72,7 +68,7 @@ This keeps the current build scripts working while making room for more board va
 ## Current Project Folder
 
 - [projects/houjinongfuai](/D:/Develop/houji/houjinongfuAI-Cursor/hartware/projects/houjinongfuai)
-  - development-system workspace for the `houjinongfuai` project
+  - project coordination workspace for the `houjinongfuai` project
 
 ## Root Workspace Map
 

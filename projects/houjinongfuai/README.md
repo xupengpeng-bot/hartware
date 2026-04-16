@@ -1,18 +1,22 @@
-# Houjinongfuai Development System
+# Houjinongfuai Project Workspace
 
 Status: active
 Audience: PM, software engineer, Cursor, Codex, Lovable
-Purpose: serve as the external development-system workspace for the `houjinongfuai` project.
+Purpose: serve as the project coordination workspace for `houjinongfuai` inside the current multi-repo workspace.
 
 ## Workspace split
 
 Use workspace-relative anchors instead of machine-specific absolute paths:
 
 - `WORKSPACE_ROOT`
-- `DEVSYSTEM_REPO_ROOT = <WORKSPACE_ROOT>\development-system`
-- `PROJECT_DEV_ROOT = <DEVSYSTEM_REPO_ROOT>\projects\houjinongfuai`
-- `BUSINESS_REPO_ROOT = <WORKSPACE_ROOT>\houjinongfuai`
-- `FRONTEND_REPO_ROOT = <WORKSPACE_ROOT>\lovable`
+- `EMBEDDED_REPO_ROOT = <WORKSPACE_ROOT>\hartware`
+- `PROJECT_DEV_ROOT = <EMBEDDED_REPO_ROOT>\projects\houjinongfuai`
+- `BUSINESS_REPO_ROOT = <WORKSPACE_ROOT>\houjinongfuai-working`
+- `FRONTEND_REPO_ROOT = <WORKSPACE_ROOT>\lovable-working`
+
+Current local example:
+
+- `WORKSPACE_ROOT = D:\Develop\houji\houjinongfuAI-Cursor`
 
 The exact drive letter or parent directory may differ by machine.
 
@@ -22,7 +26,7 @@ When starting work for this project:
 
 1. read business boundaries from `<BUSINESS_REPO_ROOT>\AGENTS.md`
 2. read `PROJECT-CONFIG-REGISTRY.md` when environment, startup, or verification is involved
-3. read dispatch and workflow docs in this development-system workspace
+3. read dispatch and workflow docs in this project workspace
 4. execute only the active typed task
 
 ## New-machine bootstrap rule

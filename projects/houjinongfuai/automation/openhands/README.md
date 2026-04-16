@@ -2,7 +2,7 @@
 
 Status: active
 Audience: PM, development_system_engineer, software_engineer
-Purpose: keep all OpenHands-specific assets in one directory inside the development-system project workspace.
+Purpose: keep all OpenHands-specific assets in one directory inside the project coordination workspace.
 
 ## Files
 

@@ -3,7 +3,7 @@
 Status: active
 Audience: PM and all delivery roles
 
-This folder is part of the external development-system workspace for:
+This folder is part of the current project coordination workspace for:
 
 - business-code workspace:
 - `<BUSINESS_REPO_ROOT>`
